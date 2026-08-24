@@ -4,7 +4,9 @@ const mineflayer = require('mineflayer');
 const { Movements, pathfinder, goals } = require('mineflayer-pathfinder');
 const { GoalBlock } = goals;
 const config = require('./settings.json');
+const playerMemory = require('./modules/playerMemory');
 const express = require('express');
+const experience = require('./modules/experienceEngine');
 const http = require('http');
 const https = require('https');
 
@@ -258,6 +260,17 @@ app.get('/health', (req, res) => {
 
 app.get('/ping', (req, res) => res.send('pong'));
 
+app.get('/brain', (req, res) => {
+  try {
+    res.json({
+      learning: experience.getReport(15)
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`[Server] HTTP server started on port ${server.address().port}`);
 });
@@ -371,6 +384,14 @@ function createBot() {
     });
 
     bot.loadPlugin(pathfinder);
+
+    // Persistent social memory: seen players are remembered across restarts.
+    bot.on('playerJoined', (player) => {
+      try { playerMemory.rememberPlayer(bot, player.username, 'joined'); } catch (_) {}
+    });
+    bot.on('playerLeft', (player) => {
+      try { playerMemory.rememberPlayer(bot, player.username, 'left'); } catch (_) {}
+    });
 
     clearBotTimeouts();
     connectionTimeoutId = setTimeout(() => {
@@ -552,7 +573,7 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
     console.log('[Position] Navigating to configured position...');
   }
 
-  if (config.utils['anti-afk']?.enabled) {
+  if (config.utils['anti-afk']?.enabled && !config.modules.survivalAI) {
 
     addInterval(() => {
       if (!bot || !botState.connected) return;
@@ -606,7 +627,7 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
     }
   }
 
-  if (config.movement?.enabled !== false) {
+  if (config.movement?.enabled !== false && !config.modules.survivalAI) {
     if (config.movement?.['circle-walk']?.enabled) {
       startCircleWalk(bot, defaultMove);
     }
@@ -634,6 +655,7 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
   if (config.modules.survivalAI) {
     try {
       require('./modules/survivalAI').start(bot, mcData, config, addInterval);
+      console.log('[SurvivalAI] Otonom karar sistemi aktif; sahte AFK hareketleri devre disi.');
     } catch (e) {
       console.log('[SurvivalAI] Başlatma hatası:', e.message);
     }
@@ -659,13 +681,55 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
         bot.chat('/' + trimmed.slice(4));
       } else if (trimmed === 'status') {
         console.log(`Connected: ${botState.connected}, Uptime: ${formatUptime(Math.floor((Date.now() - botState.startTime) / 1000))}`);
+      } else if (trimmed === 'brain') {
+        const sa = require('./modules/selfAwareness');
+        const state = require('./modules/state').loadState();
+        console.log('[Brain]', sa.statusLine(bot));
+        console.log('[Brain] goal:', state.lastDecision?.goal || 'idle', '| reason:', state.lastDecision?.reason || '-');
+        console.log('[Brain] farm:', state.farm || 'none');
+      } else if (trimmed === 'learned') {
+        const state = require('./modules/state').loadState();
+        console.log('[Learning] habits:', Object.keys(state.habits?.actions || {}).length, 'experience actions:', Object.keys(state.experience?.actions || {}).length);
+      } else if (trimmed === 'self') {
+        const sa = require('./modules/selfAwareness');
+        const state = require('./modules/state').loadState();
+        console.log('[Self]', sa.statusLine(bot));
+        console.log('[Self] capabilities:', state.awareness?.capabilities || {});
+        console.log('[Self] thought:', state.awareness?.currentThought || '-');
+      } else if (trimmed === 'knowledge') {
+        const k = require('./modules/knowledgeEngine').getKnowledge();
+        console.log('[Knowledge] topics:', Object.keys(k.topics || {}).length, 'sources:', Object.keys(k.sources || {}).length);
+        console.log((Object.entries(k.topics || {}).slice(-10)).map(([name, v]) => `${name}=${Math.round((v.confidence || 0)*100)}%`).join(' | '));
+      } else if (trimmed.startsWith('learn ')) {
+        const topic = trimmed.slice(6).trim();
+        const kcfg = config.survivalAI?.knowledge || {};
+        require('./modules/knowledgeEngine').learnTopic(topic, kcfg)
+          .then(v => console.log('[Knowledge] Learned:', v.title || topic, v.tags || []))
+          .catch(e => console.log('[Knowledge] Learn error:', e.message));
+      } else if (trimmed.startsWith('item ')) {
+        const itemName = trimmed.slice(5).trim();
+        const plan = require('./modules/acquisitionEngine').planItem(bot, mcData, itemName, 1, 7);
+        console.log('[Acquisition]', JSON.stringify(plan, null, 2));
+      } else if (trimmed === 'learnbuild') {
+        const builder = require('./modules/autonomousBuilder');
+        builder.autonomousBuildCycle(bot, mcData, { ...(config.survivalAI?.learningBuilds || {}), knowledge: config.survivalAI?.knowledge || {}, base: config.survivalAI?.base || {}, farming: config.survivalAI?.farming || {}, storage: config.survivalAI?.storage || {} })
+          .then(v => console.log('[Builder]', JSON.stringify(v, null, 2)))
+          .catch(e => console.log('[Builder] error:', e.message));
+      } else if (trimmed === 'buildstatus') {
+        const st = require('./modules/state').loadState();
+        console.log('[Builder] last:', JSON.stringify(st.learnedBuilds?.last || null, null, 2));
+      } else if (trimmed === 'baseplan') {
+        const bd = require('./modules/baseDesign');
+        const state = require('./modules/state').loadState();
+        console.log('[Base]', state.baseDesign || {});
+        console.log('[Base rooms]', bd.chooseRoomLayout(config.survivalAI?.base || {}));
       } else {
         bot.chat(trimmed);
       }
     });
   }
 
-  console.log('[Modules] All modules initialized.');
+  console.log('[Modules] Commands: brain, self, learned, knowledge, learn <topic>, item <item_name>, learnbuild, buildstatus, baseplan.');
 }
 
 function startCircleWalk(bot, defaultMove) {

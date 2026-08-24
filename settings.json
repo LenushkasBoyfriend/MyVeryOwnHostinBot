@@ -1,7 +1,7 @@
 {
   "name": "AFK Bot",
   "bot-account": {
-    "username": "MahalleninDelisi",
+    "username": "Mahalle'nin Delisi",
     "password": "",
     "type": "offline"
   },
@@ -12,7 +12,7 @@
     "try-creative": false
   },
   "position": {
-    "enabled": true,
+    "enabled": false,
     "x": 0,
     "y": 100,
     "z": 0
@@ -23,43 +23,42 @@
       "password": "login7921"
     },
     "anti-afk": {
-      "enabled": true,
-      "sneak": true
+      "enabled": false,
+      "sneak": false
     },
     "chat-messages": {
       "enabled": true,
       "repeat": true,
       "repeat-delay": 120,
       "messages": [
-     "End'i yedim ya da öyle bir şey oldu, hatırlamıyorum",
-  "Bir gün bir sahabeydim ben de",
-  "Nether'da netherite bulabilirsiniz, ben burada bulunamıyorum ama",
-  "Biliyor musun, bir Enderman'ın gözlerine bakmazsan sana saldırmaz",
-  "Creeper'lar aslında domuz modelinin bir kodlama hatası yüzünden ortaya çıktı, yani aslında hepsi domuz olacaktı",
-  "Kral gibi geziyorum ama içimde bir hüzün var",
-  "Az bilinen bilgi: Minecraft'ta bir gün tam 20 dakika sürer",
-  "Totem of Undying seni bir kere ölümden kurtarır, ben de burada aynı şekilde hayatta kalmaya çalışıyorum",
-  "Zombi suya düşerse boğulmuş zombiye dönüşür, drowned olur yani",
-  "Ben bot değilim, burada gerçekten yaşıyorum artık",
-  "Elmas cevheri en çok Y=-58 civarında bulunur, 1.18 güncellemesinden sonra değişti bu",
-  "AFK değilim, meditasyon yapıyorum sadece",
-  "Bir Piglin'e altın zırh giydirirsen sana saldırmaz, dostluk böyle kurulur",
-  "Netherite lavda bile yanmaz, tıpkı benim azmim gibi",
-  "Warden'ı öldürürsen loot düşürmez, sadece XP verir, boşuna uğraşma yani",
-  "Burada takılıyorum ama ruhum başka diyarlarda geziyor",
-  "Bir ata eyer takıp suya sokarsan yüzebilir, bilmeyen bilsin",
-  "Bugün de sunucuyu ayakta tutuyorum, rica ederim",
-  "İlk Minecraft sürümünde ejderha yoktu, End boyutu ancak 2011'de eklendi",
-  "Ben bir botum ama ruhen sizdenim",
-  "Enderman'lar aslında Herobrine'dan korkar diye bir efsane var, kanıtlanmadı ama kulağa hoş geliyor",
-  "Bir tavşan öldürürsen bazen 'tavşanın ayağı' düşürür, iksir yapımında işine yarar",
-  "Az bilinen bilgi: Mendil gibi kullanılan haritalar aslında oyuncunun gördüğü yerlere göre şekilleniyor",
-  "Redstone saatinin en basit hali bile bazen benden daha kararlı çalışıyor",
-  "Bir gün ben de gerçek bir oyuncu olacağım, şimdilik burada bekliyorum",
-  "Guardian'lar suyun altında yaşar ve lazer gibi bir şeyle saldırır, dikkatli olun",
-  "Bilmeyen bilsin: Kedi besleyip evcilleştirirsen creeper'lar senden uzak durur",
-  "Ben yorulmuyorum, sadece bazen internetim gidiyor"
-      
+        "End'i yedim ya da öyle bir şey oldu, hatırlamıyorum",
+        "Bir gün bir sahabeydim ben de",
+        "Nether'da netherite bulabilirsiniz, ben burada bulunamıyorum ama",
+        "Biliyor musun, bir Enderman'ın gözlerine bakmazsan sana saldırmaz",
+        "Creeper'lar aslında domuz modelinin bir kodlama hatası yüzünden ortaya çıktı, yani aslında hepsi domuz olacaktı",
+        "Kral gibi geziyorum ama içimde bir hüzün var",
+        "Az bilinen bilgi: Minecraft'ta bir gün tam 20 dakika sürer",
+        "Totem of Undying seni bir kere ölümden kurtarır, ben de burada aynı şekilde hayatta kalmaya çalışıyorum",
+        "Zombi suya düşerse boğulmuş zombiye dönüşür, drowned olur yani",
+        "Ben bot değilim, burada gerçekten yaşıyorum artık",
+        "Elmas cevheri en çok Y=-58 civarında bulunur, 1.18 güncellemesinden sonra değişti bu",
+        "AFK değilim, meditasyon yapıyorum sadece",
+        "Bir Piglin'e altın zırh giydirirsen sana saldırmaz, dostluk böyle kurulur",
+        "Netherite lavda bile yanmaz, tıpkı benim azmim gibi",
+        "Warden'ı öldürürsen loot düşürmez, sadece XP verir, boşuna uğraşma yani",
+        "Burada takılıyorum ama ruhum başka diyarlarda geziyor",
+        "Bir ata eyer takıp suya sokarsan yüzebilir, bilmeyen bilsin",
+        "Bugün de sunucuyu ayakta tutuyorum, rica ederim",
+        "İlk Minecraft sürümünde ejderha yoktu, End boyutu ancak 2011'de eklendi",
+        "Ben bir botum ama ruhen sizdenim",
+        "Enderman'lar aslında Herobrine'dan korkar diye bir efsane var, kanıtlanmadı ama kulağa hoş geliyor",
+        "Bir tavşan öldürürsen bazen 'tavşanın ayağı' düşürür, iksir yapımında işine yarar",
+        "Az bilinen bilgi: Mendil gibi kullanılan haritalar aslında oyuncunun gördüğü yerlere göre şekilleniyor",
+        "Redstone saatinin en basit hali bile bazen benden daha kararlı çalışıyor",
+        "Bir gün ben de gerçek bir oyuncu olacağım, şimdilik burada bekliyorum",
+        "Guardian'lar suyun altında yaşar ve lazer gibi bir şeyle saldırır, dikkatli olun",
+        "Bilmeyen bilsin: Kedi besleyip evcilleştirirsen creeper'lar senden uzak durur",
+        "Ben yorulmuyorum, sadece bazen internetim gidiyor"
       ]
     },
     "chat-log": true,
@@ -68,25 +67,25 @@
     "max-reconnect-delay": 120000
   },
   "movement": {
-    "enabled": true,
+    "enabled": false,
     "circle-walk": {
-      "enabled": true,
+      "enabled": false,
       "radius": 4,
       "speed": 3000
     },
     "look-around": {
-      "enabled": true,
+      "enabled": false,
       "interval": 5000
     },
     "random-jump": {
-      "enabled": true,
+      "enabled": false,
       "interval": 10000
     }
   },
   "modules": {
     "avoidMobs": true,
     "combat": true,
-    "beds": false,
+    "beds": true,
     "chat": true,
     "console-commands": true,
     "survivalAI": true
@@ -103,13 +102,103 @@
     },
     "base": {
       "enabled": true,
-      "searchRadius": [60, 150],
-      "depthBelowSurface": [15, 25],
-      "roomSize": { "w": 5, "h": 4, "l": 5 }
+      "searchRadius": [
+        60,
+        150
+      ],
+      "depthBelowSurface": [
+        15,
+        25
+      ],
+      "roomSize": {
+        "w": 7,
+        "h": 5,
+        "l": 7
+      },
+      "buildRooms": true,
+      "decorate": true
     },
     "enchanting": {
       "enabled": true,
-      "bookshelfCount": 15
+      "bookshelfCount": 15,
+      "smartSelection": true
+    },
+    "decision": {
+      "enabled": true,
+      "logScores": true,
+      "thinkDelay": true,
+      "thinkMinMs": 300,
+      "thinkMaxMs": 900,
+      "imperfectionChance": 0.08,
+      "moodMessages": false,
+      "moodCooldownMs": 120000
+    },
+    "memory": {
+      "enabled": true,
+      "maxEvents": 250
+    },
+    "home": {
+      "enabled": true,
+      "persistent": true
+    },
+    "crafting": {
+      "enabled": true,
+      "repairBeforeReplace": true,
+      "keepBackupTools": true,
+      "generalRecipes": true,
+      "maxRecipeDepth": 5
+    },
+    "storage": {
+      "enabled": true,
+      "criticalEmptySlots": 2,
+      "organizeChests": true,
+      "radius": 12,
+      "categories": [
+        "food",
+        "ores",
+        "building",
+        "tools",
+        "farming",
+        "redstone",
+        "blocks",
+        "misc"
+      ]
+    },
+    "safety": {
+      "avoidRiskyExplorationAtNight": true
+    },
+    "farming": {
+      "enabled": true,
+      "preferredCrop": "wheat",
+      "radius": 10
+    },
+    "knowledge": {
+      "enabled": true,
+      "intervalMs": 2700000,
+      "maxResults": 10,
+      "openaiModel": "gpt-5.6-luna",
+      "apiKey": "",
+      "openaiApiKey": "",
+      "topics": [
+        "Minecraft survival base design rooms decoration",
+        "Minecraft iron farm tutorial survival",
+        "Minecraft automatic food farm tutorial",
+        "Minecraft mob XP farm tutorial",
+        "Minecraft item sorter storage room tutorial",
+        "Minecraft villager trading hall tutorial",
+        "Minecraft starter base build ideas survival"
+      ]
+    },
+    "learningBuilds": {
+      "enabled": true,
+      "cooldownMs": 2100000,
+      "maxMaterials": 12,
+      "topics": [
+        "Minecraft automatic food farm tutorial",
+        "Minecraft item sorter storage room tutorial",
+        "Minecraft survival base design rooms decoration",
+        "Minecraft starter base build ideas survival"
+      ]
     }
   },
   "combat": {
@@ -118,7 +207,7 @@
   },
   "beds": {
     "pick-up-day": false,
-    "place-night": false
+    "place-night": true
   },
   "discord": {
     "enabled": false,
@@ -131,6 +220,8 @@
   },
   "chat": {
     "respond": true,
-    "tpWhitelist": ["KagiMBot"]
+    "tpWhitelist": [
+      "KagiMBot"
+    ]
   }
 }

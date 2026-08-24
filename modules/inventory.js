@@ -227,3 +227,94 @@ module.exports = {
   craftArmorTier,
   smeltItems
 };
+
+// Genel amaçlı, tarif grafiğini takip eden craft yardımcısı.
+// Önce mevcut bot tariflerini kullanır; eksik ara ürünler varsa mcData tariflerinden
+// olası üretim yolunu arayıp ara ürünleri de sırayla üretmeyi dener.
+function buildRecipeGraph(mcData) {
+  const graph = {};
+  const recipes = Array.isArray(mcData?.recipes) ? mcData.recipes : [];
+  for (const recipe of recipes) {
+    const resultId = recipe.result?.id ?? recipe.result?.item ?? recipe.result?.type;
+    if (resultId == null) continue;
+    const result = mcData.items?.[resultId] || mcData.itemsArray?.find(i => i.id === resultId);
+    if (!result?.name) continue;
+    const ingredients = [];
+    const raw = recipe.ingredients || recipe.ingredient || [];
+    for (const ing of raw) {
+      if (Array.isArray(ing)) {
+        const ids = ing.map(x => typeof x === 'number' ? x : x?.id).filter(Boolean);
+        const pick = ids.length ? ids[0] : null;
+        const item = pick ? (mcData.items?.[pick] || mcData.itemsArray?.find(i => i.id === pick)) : null;
+        if (item?.name) ingredients.push(item.name);
+      } else {
+        const id = typeof ing === 'number' ? ing : ing?.id;
+        const item = id ? (mcData.items?.[id] || mcData.itemsArray?.find(i => i.id === id)) : null;
+        if (item?.name) ingredients.push(item.name);
+      }
+    }
+    if (!graph[result.name]) graph[result.name] = [];
+    graph[result.name].push({ recipe, ingredients });
+  }
+  return graph;
+}
+
+async function craftAnyItem(bot, mcData, itemName, count = 1, options = {}) {
+  const maxDepth = options.maxDepth || 5;
+  const visiting = options.visiting || new Set();
+  if (countItem(bot, itemName) >= count) return true;
+  if (visiting.has(itemName) || maxDepth <= 0) return false;
+  visiting.add(itemName);
+
+  const data = mcData.itemsByName[itemName];
+  if (!data) { visiting.delete(itemName); return false; }
+
+  let recipes = bot.recipesFor(data.id, null, 1, options.table || null);
+  if (recipes.length) {
+    const ok = await craftItemByName(bot, mcData, itemName, count, options.table || null);
+    visiting.delete(itemName);
+    return ok || countItem(bot, itemName) >= count;
+  }
+
+  const graph = buildRecipeGraph(mcData);
+  const candidates = graph[itemName] || [];
+  for (const candidate of candidates) {
+    let possible = true;
+    for (const ing of candidate.ingredients) {
+      if (countItem(bot, ing) > 0) continue;
+      // Recursive production is deliberately shallow to avoid loops.
+      if (!(await craftAnyItem(bot, mcData, ing, 1, { ...options, maxDepth: maxDepth - 1, visiting }))) {
+        possible = false;
+        break;
+      }
+    }
+    if (!possible) continue;
+    recipes = bot.recipesFor(data.id, null, 1, options.table || null);
+    if (recipes.length) {
+      const ok = await craftItemByName(bot, mcData, itemName, count, options.table || null);
+      visiting.delete(itemName);
+      return ok || countItem(bot, itemName) >= count;
+    }
+  }
+  visiting.delete(itemName);
+  return false;
+}
+
+module.exports.craftAnyItem = craftAnyItem;
+module.exports.buildRecipeGraph = buildRecipeGraph;
+
+function getRecipeKnowledge(mcData) {
+  const graph = buildRecipeGraph(mcData);
+  const result = {};
+  for (const item of (mcData?.itemsArray || [])) {
+    const recipes = graph[item.name] || [];
+    result[item.name] = {
+      craftable: recipes.length > 0,
+      recipeCount: recipes.length,
+      ingredients: recipes[0]?.ingredients || [],
+      methods: recipes.length ? ['craft'] : ['learn-or-explore']
+    };
+  }
+  return result;
+}
+module.exports.getRecipeKnowledge = getRecipeKnowledge;

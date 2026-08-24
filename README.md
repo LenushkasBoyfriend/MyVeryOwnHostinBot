@@ -393,3 +393,98 @@ the bot will, in order:
   guarantee a perfect, artifact-free result in every biome/cave shape.
 - All of this runs alongside the existing AFK/anti-detection features and
   can be toggled off by setting `modules.survivalAI` to `false`.
+
+
+## Survival Brain v2
+
+The survival system now uses `modules/decisionEngine.js` to score competing goals
+instead of following only one fixed priority chain. It persists decisions,
+success/failure history, important home state and player observations in
+`survival_state.json`.
+
+The bot can dynamically prepare tools, maintain food/fuel, craft progression
+gear, use its base as a persistent home, return home at night, sleep when a bed
+is available, store surplus items, and prepare/enchant gear when conditions
+allow. The implementation is intentionally constrained to information available
+to the bot in-game; it does not use hidden world knowledge.
+
+Player observations are persisted through `modules/playerMemory.js`, and the
+dashboard/bot runtime remains compatible with the existing reconnect loop.
+
+## Autonomous Experience Learning (New)
+
+`modules/experienceEngine.js` adds a persistent trial -> outcome -> reward loop.
+The bot starts an episode whenever it selects a survival goal, records a compact
+before-state, runs the goal, measures the after-state and assigns a bounded reward.
+The result updates both a global action estimate and a context-specific estimate.
+
+This does not rewrite source code or pretend to be a magical self-aware AI. It is
+an online learning layer: actions that repeatedly work in a context become more
+attractive, actions that repeatedly fail become less attractive, and low-sample
+actions receive a small exploration bonus so the bot can still try alternatives.
+
+State is persisted in `survival_state.json` under `experience`.
+`/brain` exposes the top learned action estimates for debugging.
+
+## Autonomous Survival v3
+
+SurvivalAI artık sahte AFK hareketleri yerine gerçek görev seçimiyle çalışır. `decisionEngine` mevcut durum, deneyim ve alışkanlık puanlarını birlikte değerlendirir; yakın seçenekler arasında kontrollü küçük farklılıklar yapabilir ve kısa bir düşünme gecikmesi uygular.
+
+### Yeni davranışlar
+- Gerçek otonom karar döngüsü: algıla -> hedef seç -> düşün -> uygula -> sonucu kaydet.
+- `habitEngine`: aynı koşullarda tekrar eden başarılı/başarısız davranışlardan alışkanlık çıkarır; üst üste başarısız eylemleri ciddi biçimde bastırır.
+- `selfAwareness`: can, açlık, XP, envanter, ev ve çiftlik durumunu tek bir öz-farkındalık özeti olarak kaydeder.
+- `farming`: çapa üretme, tohum bulma, tarla sürme, ekme ve olgun ürünü hasat etme döngüsü.
+- `inventory.craftAnyItem`: tarif grafiğini ve ara ürünleri kullanarak genel amaçlı craft denemesi.
+- Gizli üs odaları: depo, atölye, tarım ve büyü odaları ayrı aşamalarda oluşturulur ve tamamlanan odalar state'e yazılır.
+- Sandık düzenleme: yakın sandıkları baskın kategoriye göre doldurur.
+
+### Konsol
+- `status` — bağlantı ve uptime.
+- `brain` — o anki öz-farkındalık, hedef, neden ve çiftlik durumunu gösterir.
+- `learned` — alışkanlık ve deneyim kayıt sayılarını gösterir.
+- `say <mesaj>` — chat'e mesaj gönderir.
+- `cmd <komut>` — Minecraft komutu gönderir.
+
+### Ayarlar
+`settings.json` içinde SurvivalAI açıkken `movement.circle-walk`, `movement.random-jump`, `movement.look-around`, sabit `position` ve `utils.anti-afk` kapalı tutulur. Böylece otonom pathfinder hareketleri ile sahte AFK döngüleri çakışmaz.
+
+## Autonomous World Knowledge + Designed Base (v7)
+
+This build extends the Survival Brain with a persistent knowledge layer, an item-acquisition planner, a self-model, and a designed underground base.
+
+### Base design
+The bot does not use one fixed block palette. It looks at what it actually has, chooses a workable style and builds functional rooms such as storage, workshop, farm, enchantment, furnace and bedroom spaces. Rooms are built incrementally and recorded in persistent state. Decoration is intentionally symmetric and material-aware rather than random block spam.
+
+### Storage
+Dedicated category chests are created and used for food, ores/resources, building blocks, tools/gear, farming, redstone, blocks and miscellaneous items. The organizer can pull misplaced contents from nearby chests and redistribute them into category storage.
+
+### Crafting and acquisition knowledge
+The bot can generate a local knowledge map for the items exposed by `minecraft-data`, including which items have recipes and which ones require exploration/collection rather than direct crafting. `item <item_name>` prints an acquisition plan through recursive recipe dependencies.
+
+### External learning
+The Knowledge Brain can search YouTube, select relevant videos, retrieve available captions, classify Minecraft techniques, and optionally ask an OpenAI Responses API model to turn the transcript into structured, testable knowledge. Learned sources and topic confidence are stored locally.
+
+Configure `survivalAI.knowledge.apiKey` for YouTube Data API use, or leave it blank to allow the best-effort public-page fallback. Configure `OPENAI_API_KEY` (or `survivalAI.knowledge.openaiApiKey`) to enable model-assisted analysis. YouTube and API providers still impose their own quotas, rate limits and terms; there is no honest way to promise literally unlimited remote access.
+
+### Self-awareness / consciousness note
+The bot now keeps a self-model: capabilities, current thought/plan, strengths, weaknesses and reflections. This is functional self-monitoring and decision-state tracking, not human consciousness or sentience.
+
+### Console commands
+- `brain` — current decision and survival state
+- `self` — capability/self-model snapshot
+- `learned` — experience/habit statistics
+- `knowledge` — learned topics and source counts
+- `learn <topic>` — research a Minecraft topic now
+- `item <item_name>` — show a recursive acquisition/crafting plan
+- `baseplan` — show the chosen base style and room layout
+
+## Autonomous Learn -> Gather -> Build -> Verify
+
+The bot now has a bounded `autonomousBuilder` pipeline. It can select a learned YouTube/knowledge source, derive materials, gather/craft prerequisites, execute a verified local template (crop farm, storage room, room decoration), record the result, and feed the experiment back into the knowledge store. Unknown or version-sensitive farm designs are recorded as learned plans rather than blindly placing unsafe structures.
+
+Console commands:
+- `learnbuild` — run the autonomous learn/gather/build/verify cycle.
+- `buildstatus` — inspect the last learned build plan and its result.
+
+Configuration lives under `survivalAI.learningBuilds` in `settings.json`.
