@@ -631,6 +631,13 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
   if (config.modules.chat) {
     chatModule(bot);
   }
+  if (config.modules.survivalAI) {
+    try {
+      require('./modules/survivalAI').start(bot, mcData, config, addInterval);
+    } catch (e) {
+      console.log('[SurvivalAI] Başlatma hatası:', e.message);
+    }
+  }
 
   if (config.utils['chat-log']) {
     bot.on('chat', (username, message) => {

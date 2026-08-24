@@ -88,7 +88,29 @@
     "combat": true,
     "beds": false,
     "chat": true,
-    "console-commands": true
+    "console-commands": true,
+    "survivalAI": true
+  },
+  "survivalAI": {
+    "enabled": true,
+    "interval": 4000,
+    "gather": {
+      "woodTarget": 20,
+      "cobbleTarget": 32
+    },
+    "mining": {
+      "shaftYLevel": -58
+    },
+    "base": {
+      "enabled": true,
+      "searchRadius": [60, 150],
+      "depthBelowSurface": [15, 25],
+      "roomSize": { "w": 5, "h": 4, "l": 5 }
+    },
+    "enchanting": {
+      "enabled": true,
+      "bookshelfCount": 15
+    }
   },
   "combat": {
     "attack-mobs": true,

@@ -352,3 +352,44 @@ Visit /ping to confirm the service is running.
 - MrJuice (Discord: MrJuice3046) - Rewrites, fixes, and maintenance
 
 License: MIT
+
+---
+
+## Survival AI Module (New)
+
+`modules/survivalAI.js` (plus `modules/utils.js`, `inventory.js`, `gathering.js`,
+`baseBuilder.js`, `enchanting.js`, `state.js`) adds an optional, priority-based
+autonomous survival loop. When `settings.json -> modules.survivalAI` is `true`,
+the bot will, in order:
+
+1. Eat / hunt animals when hungry.
+2. Chop wood and craft a full wooden tool set.
+3. Mine stone and craft a full stone tool set.
+4. Mine coal + iron, smelt it, and craft a full iron tool + armor set.
+5. Strip-mine at depth for diamond (plus lapis/gold/redstone along the way)
+   and craft a full diamond tool + armor set.
+6. Dig down at a random location far from spawn, carve out a hidden room,
+   place a crafting table/furnace/chest, and **seal the entrance tunnel
+   behind itself** using the same block types it dug out, so the shaft is
+   not visible from the surface. The base location is saved to
+   `survival_state.json` so it's remembered across restarts.
+7. Build a bookshelf ring (15 bookshelves) around an enchanting table for
+   level-30 enchants, then enchant its iron/diamond gear with the strongest
+   option it's offered.
+8. Periodically returns to the base to store surplus items.
+
+### Notes / limitations
+
+- Install the new optional dependencies after unzipping:
+  `npm install` (adds `mineflayer-tool` and `mineflayer-armor-manager`).
+- The enchanting table itself needs obsidian + diamonds, which this bot does
+  not farm automatically (obsidian requires a diamond pickaxe near a safe
+  lava+water source, which is risky to automate blindly). If you want, give
+  the bot an enchanting table in its inventory (creative/OP) or extend
+  `modules/enchanting.js` with an obsidian-farming routine.
+- "Undetectable" base/terrain patching is best-effort: dug blocks are
+  replaced with the same block type (stone -> stone, granite -> granite,
+  etc.) using whatever matching block is in the bot's inventory. It can't
+  guarantee a perfect, artifact-free result in every biome/cave shape.
+- All of this runs alongside the existing AFK/anti-detection features and
+  can be toggled off by setting `modules.survivalAI` to `false`.

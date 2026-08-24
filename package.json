@@ -13,7 +13,10 @@
     "express": "^4.18.1",
     "minecraft-data": "latest",
     "mineflayer": "latest",
-    "mineflayer-pathfinder": "latest"
+    "mineflayer-pathfinder": "latest",
+    "mineflayer-tool": "^1.2.0",
+    "mineflayer-armor-manager": "^2.0.1",
+    "vec3": "^0.1.8"
   },
   "devDependencies": {
     "eslint": "^10.8.1"
