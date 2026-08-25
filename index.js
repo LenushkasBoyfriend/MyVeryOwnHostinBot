@@ -16,6 +16,43 @@ const PORT = process.env.PORT || 5000;
 let bot = null;
 let activeIntervals = [];
 let reconnectTimeoutId = null;
+let protocolFallbackIndex = 0;
+let protocolFallbackCooldownUntil = 0;
+
+function getProtocolCandidates() {
+  const pf = config.server?.['protocol-fallback'];
+  if (!pf?.enabled) return [config.server?.version || ''];
+  const versions = Array.isArray(pf.versions) ? pf.versions.filter(Boolean) : [];
+  return versions.length ? versions : [config.server?.version || ''];
+}
+
+function getCurrentProtocolVersion() {
+  const candidates = getProtocolCandidates();
+  return candidates[Math.min(protocolFallbackIndex, candidates.length - 1)] || '';
+}
+
+function isProtocolFailure(reason) {
+  const text = String(reason || '').toLowerCase();
+  const markers = config.server?.['protocol-fallback']?.['switch-on-errors'];
+  if (!Array.isArray(markers) || markers.length === 0) {
+    return text.includes('serverbound/minecraft:hello') || text.includes('decoderexception') || text.includes('failed to decode packet');
+  }
+  return markers.some(marker => text.includes(String(marker).toLowerCase()));
+}
+
+function maybeRotateProtocol(reason) {
+  const candidates = getProtocolCandidates();
+  if (candidates.length < 2 || !isProtocolFailure(reason)) return false;
+  const now = Date.now();
+  if (now < protocolFallbackCooldownUntil) return false;
+  const old = getCurrentProtocolVersion();
+  protocolFallbackIndex = (protocolFallbackIndex + 1) % candidates.length;
+  const next = getCurrentProtocolVersion();
+  protocolFallbackCooldownUntil = now + (config.server?.['protocol-fallback']?.['cooldown-ms'] || 15000);
+  console.log(`[Protocol] Compatibility fallback: ${old || 'auto'} -> ${next || 'auto'}`);
+  console.log(`[Protocol] Reason: ${String(reason).slice(0, 300)}`);
+  return true;
+}
 let connectionTimeoutId = null;
 let isReconnecting = false;
 
@@ -366,11 +403,14 @@ function createBot() {
   console.log(`[Bot] Connecting to ${config.server.ip}:${config.server.port}`);
 
   try {
-    const botVersion = config.server.version && config.server.version.trim() !== '' ? config.server.version : false;
+    const selectedVersion = getCurrentProtocolVersion();
+    const botVersion = selectedVersion && selectedVersion.trim() !== '' ? selectedVersion : false;
 
     const botUsername = process.env.BOT_USERNAME || config['bot-account'].username;
     const botPassword = process.env.BOT_PASSWORD || config['bot-account'].password || undefined;
     const authPassword = process.env.BOT_AUTH_PASSWORD || config.utils['auto-auth']?.password;
+
+    console.log(`[Protocol] Mineflayer ${require('mineflayer/package.json').version} | client version: ${botVersion || 'auto'} | fallback: ${getProtocolCandidates().join(' -> ')}`);
 
     bot = mineflayer.createBot({
       username: botUsername,
@@ -454,6 +494,7 @@ function createBot() {
       pushError({ type: 'kicked', reason: kickReason, time: Date.now() });
       clearAllIntervals();
 
+      maybeRotateProtocol(kickReason);
       const reasonStr = String(kickReason).toLowerCase();
       if (reasonStr.includes('throttl') || reasonStr.includes('wait before reconnect') || reasonStr.includes('too fast')) {
         console.log('[Bot] Throttle kick detected');
@@ -471,6 +512,7 @@ function createBot() {
       botState.connected = false;
       clearAllIntervals();
       spawnHandled = false;
+      maybeRotateProtocol(reason);
 
       if (config.discord?.events?.disconnect) {
         sendDiscordWebhook(`Disconnected: ${reason || 'Unknown'}`, 0xf87171);
@@ -482,6 +524,7 @@ function createBot() {
     bot.on('error', (err) => {
       console.log(`[Bot] Error: ${err.message}`);
       pushError({ type: 'error', message: err.message, time: Date.now() });
+      maybeRotateProtocol(err.message);
 
     });
 
@@ -696,6 +739,24 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
         console.log('[Self]', sa.statusLine(bot));
         console.log('[Self] capabilities:', state.awareness?.capabilities || {});
         console.log('[Self] thought:', state.awareness?.currentThought || '-');
+      } else if (trimmed.startsWith('videoresearch ')) {
+        const topic = trimmed.slice(14).trim();
+        const vr = require('./modules/videoResearch');
+        const vcfg = config.survivalAI?.knowledge || {};
+        vr.researchTopic(topic, { ...vcfg, enableVideoDownload: vcfg.enableVideoDownload !== false, maxVisionFrames: vcfg.maxVisionFrames || 8 })
+          .then(v => { const st = require('./modules/state').loadState(); st.videoResearch.last = v; st.videoResearch.history.push({ topic, at: Date.now(), sourceCount: v.sources?.length || 0, confidence: v.plan?.confidence || 0 }); require('./modules/state').saveState(st); console.log('[VideoResearch]', JSON.stringify({ topic, sources: v.sources?.length || 0, confidence: v.plan?.confidence || 0, frames: v.sources?.reduce((n,x)=>n+(x.evidence?.storyboardFrames||0),0) }, null, 2)); })
+          .catch(e => console.log('[VideoResearch] error:', e.message));
+      } else if (trimmed === 'fullacquisition') {
+        const wa = require('./modules/worldAcquisition');
+        const graph = wa.buildFullGraph(bot, mcData, { defaultCount: 1, maxDepth: config.survivalAI?.acquisition?.maxDepth || 8 });
+        const st = require('./modules/state').loadState(); st.acquisitionGraph = graph; require('./modules/state').saveState(st);
+        console.log('[FullAcquisition]', JSON.stringify({ itemCount: graph.itemCount, learnedTopicCount: graph.learnedTopicCount }, null, 2));
+      } else if (trimmed.startsWith('farmauto ')) {
+        const topic = trimmed.slice(9).trim();
+        const builder = require('./modules/autonomousBuilder');
+        builder.learnPlanBuild(bot, mcData, topic, { ...(config.survivalAI?.learningBuilds || {}), researchBeforeBuild: true, knowledge: config.survivalAI?.knowledge || {}, base: config.survivalAI?.base || {}, farming: config.survivalAI?.farming || {}, storage: config.survivalAI?.storage || {} })
+          .then(v => console.log('[FarmAuto]', JSON.stringify(v, null, 2)))
+          .catch(e => console.log('[FarmAuto] error:', e.message));
       } else if (trimmed === 'knowledge') {
         const k = require('./modules/knowledgeEngine').getKnowledge();
         console.log('[Knowledge] topics:', Object.keys(k.topics || {}).length, 'sources:', Object.keys(k.sources || {}).length);
@@ -708,8 +769,19 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
           .catch(e => console.log('[Knowledge] Learn error:', e.message));
       } else if (trimmed.startsWith('item ')) {
         const itemName = trimmed.slice(5).trim();
-        const plan = require('./modules/acquisitionEngine').planItem(bot, mcData, itemName, 1, 7);
+        const plan = require('./modules/acquisitionEngine').planItem(bot, mcData, itemName, 1, (config.survivalAI?.acquisition?.maxDepth || 8));
         console.log('[Acquisition]', JSON.stringify(plan, null, 2));
+      } else if (trimmed === 'acquisition') {
+        const ae = require('./modules/acquisitionEngine');
+        const graph = ae.buildAcquisitionGraph(bot, mcData, { defaultCount: 1, maxDepth: config.survivalAI?.acquisition?.maxDepth || 8 });
+        console.log('[AcquisitionGraph]', JSON.stringify({ itemCount: graph.itemCount, generatedAt: graph.generatedAt }, null, 2));
+        try { require('./modules/knowledgeEngine').saveKnowledge(Object.assign(require('./modules/knowledgeEngine').loadKnowledge(), { acquisition: graph })); } catch (_) {}
+      } else if (trimmed.startsWith('farm ')) {
+        const topic = trimmed.slice(5).trim();
+        const builder = require('./modules/autonomousBuilder');
+        builder.learnPlanBuild(bot, mcData, topic, { ...(config.survivalAI?.learningBuilds || {}), tag: /iron/i.test(topic) ? 'iron-farm' : /mob|xp/i.test(topic) ? 'mob-farm' : 'food-farm', knowledge: config.survivalAI?.knowledge || {}, base: config.survivalAI?.base || {}, farming: config.survivalAI?.farming || {}, storage: config.survivalAI?.storage || {} })
+          .then(v => console.log('[Farm]', JSON.stringify(v, null, 2)))
+          .catch(e => console.log('[Farm] error:', e.message));
       } else if (trimmed === 'learnbuild') {
         const builder = require('./modules/autonomousBuilder');
         builder.autonomousBuildCycle(bot, mcData, { ...(config.survivalAI?.learningBuilds || {}), knowledge: config.survivalAI?.knowledge || {}, base: config.survivalAI?.base || {}, farming: config.survivalAI?.farming || {}, storage: config.survivalAI?.storage || {} })
@@ -729,7 +801,7 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
     });
   }
 
-  console.log('[Modules] Commands: brain, self, learned, knowledge, learn <topic>, item <item_name>, learnbuild, buildstatus, baseplan.');
+  console.log('[Modules] Commands: brain, self, learned, knowledge, learn <topic>, videoresearch <topic>, item <item_name>, acquisition, fullacquisition, farm <topic>, farmauto <topic>, learnbuild, buildstatus, baseplan.');
 }
 
 function startCircleWalk(bot, defaultMove) {

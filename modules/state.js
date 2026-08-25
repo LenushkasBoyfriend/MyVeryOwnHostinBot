@@ -34,7 +34,11 @@ const DEFAULT = {
   storage: { version: 1, categoryChests: {}, lastSortAt: 0 },
   knowledge: { version: 1, learnedTopics: {}, lastResearchAt: 0 },
   itemKnowledge: { version: 1, itemCount: 0, generatedAt: 0 },
-  learnedBuilds: { last: null, history: [] }
+  learnedBuilds: { last: null, history: [] },
+  learnedFarms: { last: null, history: [] },
+  acquisitionGraph: { version: 1, itemCount: 0, generatedAt: 0 },
+  acquisitionLearning: { methods: {}, recent: [] },
+  videoResearch: { last: null, history: [] }
 };
 
 function mergeDefaults(value) {
@@ -49,7 +53,11 @@ function mergeDefaults(value) {
     storage: { ...DEFAULT.storage, ...(s.storage || {}), categoryChests: { ...(s.storage?.categoryChests || {}) } },
     knowledge: { ...DEFAULT.knowledge, ...(s.knowledge || {}), learnedTopics: { ...(s.knowledge?.learnedTopics || {}) } },
     itemKnowledge: { ...DEFAULT.itemKnowledge, ...(s.itemKnowledge || {}) },
-    learnedBuilds: { ...DEFAULT.learnedBuilds, ...(s.learnedBuilds || {}), history: Array.isArray(s.learnedBuilds?.history) ? s.learnedBuilds.history.slice(-40) : [] }
+    learnedBuilds: { ...DEFAULT.learnedBuilds, ...(s.learnedBuilds || {}), history: Array.isArray(s.learnedBuilds?.history) ? s.learnedBuilds.history.slice(-40) : [] },
+    learnedFarms: { ...DEFAULT.learnedFarms, ...(s.learnedFarms || {}), history: Array.isArray(s.learnedFarms?.history) ? s.learnedFarms.history.slice(-60) : [] },
+    acquisitionGraph: { ...DEFAULT.acquisitionGraph, ...(s.acquisitionGraph || {}) },
+    acquisitionLearning: { ...DEFAULT.acquisitionLearning, ...(s.acquisitionLearning || {}), methods: { ...(s.acquisitionLearning?.methods || {}) }, recent: Array.isArray(s.acquisitionLearning?.recent) ? s.acquisitionLearning.recent.slice(-100) : [] },
+    videoResearch: { ...DEFAULT.videoResearch, ...(s.videoResearch || {}), history: Array.isArray(s.videoResearch?.history) ? s.videoResearch.history.slice(-60) : [] }
   };
 }
 function loadState() {

@@ -44,10 +44,13 @@ function start(bot, mcData, config, addInterval) {
     const state = loadState();
     if (!state.itemKnowledge?.generatedAt || Date.now() - state.itemKnowledge.generatedAt > 24 * 3600 * 1000) {
       const itemKnowledge = acquisition.buildItemKnowledge(mcData);
-      state.itemKnowledge = { version: 1, itemCount: Object.keys(itemKnowledge).length, generatedAt: Date.now() };
+      state.itemKnowledge = { version: 2, itemCount: Object.keys(itemKnowledge).length, generatedAt: Date.now() };
       try {
         const db = knowledge.loadKnowledge();
         db.items = itemKnowledge;
+        const graph = acquisition.buildAcquisitionGraph(bot, mcData, { defaultCount: 1, maxDepth: (cfg.crafting || {}).maxRecipeDepth || 8 });
+        state.acquisitionGraph = { version: 2, itemCount: graph.itemCount, generatedAt: graph.generatedAt };
+        db.acquisition = graph;
         saveState(state);
         knowledge.saveKnowledge(db);
       } catch (_) { saveState(state); }

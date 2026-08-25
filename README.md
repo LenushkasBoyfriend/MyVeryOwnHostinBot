@@ -488,3 +488,53 @@ Console commands:
 - `buildstatus` — inspect the last learned build plan and its result.
 
 Configuration lives under `survivalAI.learningBuilds` in `settings.json`.
+
+## V9: Deep external learning, farm planning and acquisition graph
+- `videoVision.js`: YouTube thumbnail + optional vision analysis; combines visual findings with transcript knowledge.
+- `farmPlanner.js`: normalizes learned farm plans, estimates materials, validates bounded dimensions, prepares materials and can execute verified block-placement blueprints.
+- `acquisitionEngine.js`: expanded acquisition classification for craft, smelt, mine, trees, fishing, mob drops, villager trades, structure loot and dimension-specific resources.
+- `acquisition` console command builds a broad acquisition graph; `item <name>` prints a recursive acquisition plan.
+- `farm <topic>` researches/selects a farm knowledge source and sends a structured plan into the learned-builder pipeline.
+- `learnbuild` runs the normal research -> material preparation -> build -> verify -> experiment loop.
+
+### V9 limitations
+Visual analysis requires an OpenAI API key and a vision-capable model configuration. Full raw-video frame extraction is not guaranteed; the current implementation uses the available transcript plus a YouTube thumbnail as a visual verifier. Arbitrary farms without verified 3-D coordinates are not blindly built. Live Minecraft integration still requires the project's normal runtime dependencies and an actual server connection.
+
+
+## V10 — Deep external learning + autonomous execution
+
+The V10 layer adds three connected systems: video/storyboard research, detailed farm execution, and a broader acquisition graph.
+
+### Video/storyboard research
+- `videoresearch <topic>` researches multiple YouTube candidates rather than trusting one result.
+- When `yt-dlp` + `ffmpeg` are installed and `enableVideoDownload` is enabled, a bounded storyboard can be extracted and multiple frames can be analyzed with a vision-capable OpenAI model.
+- Transcript evidence and visual evidence are fused; source confidence is lowered when geometry is not actually supported.
+
+### Farm execution
+- Learned plans are validated for dimensions and placement count before building.
+- The executor recursively prepares materials through crafting and supported gathering actions.
+- Blueprint blocks are placed bottom-up, then sampled for verification.
+- Failed material or verification stages are recorded as experiments for later strategy changes.
+- Unknown farm geometry is not invented.
+
+### Full acquisition graph
+- `fullacquisition` builds the recipe graph plus heuristic mine/tree/fishing/mob/structure/villager-trade routes.
+- Acquisition methods have confidence scores and can learn from actual success/failure outcomes.
+- Structure/trade hints are deliberately treated as hints, not as guaranteed loot tables.
+
+### New commands
+- `videoresearch <topic>`
+- `fullacquisition`
+- `farmauto <topic>`
+
+### Important runtime limits
+Video downloading and external APIs require network access and their own provider limits/credentials. Visual analysis requires an appropriate OpenAI API key. Live Minecraft execution still depends on the configured Mineflayer version, server mechanics and available dependencies.
+
+
+## Minecraft 1.21.11 + ViaVersion protocol compatibility
+
+This build pins the primary client protocol to `1.21.11` and keeps `1.21.4` as a ViaVersion-compatible fallback. The bot rotates to the fallback only when a connection reports protocol/decoder-style failures such as `serverbound/minecraft:hello` decode errors.
+
+The previous `package-lock.json` was removed because it pinned an older Mineflayer/minecraft-protocol stack. The deployment platform must run `npm install` (Node.js 22+) to generate a fresh lockfile from the updated dependency ranges.
+
+Useful settings are under `server.protocol-fallback` in `settings.json`.

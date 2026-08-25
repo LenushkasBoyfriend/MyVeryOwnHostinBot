@@ -8,8 +8,23 @@
   "server": {
     "ip": "31ibo311.aternos.me",
     "port": 31502,
-    "version": "",
-    "try-creative": false
+    "version": "1.21.11",
+    "try-creative": false,
+    "protocol-fallback": {
+      "enabled": true,
+      "versions": [
+        "1.21.11",
+        "1.21.4"
+      ],
+      "switch-on-errors": [
+        "serverbound/minecraft:hello",
+        "decoderexception",
+        "decod",
+        "protocol",
+        "bad packet"
+      ],
+      "cooldown-ms": 15000
+    }
   },
   "position": {
     "enabled": false,
@@ -178,6 +193,10 @@
       "maxResults": 10,
       "openaiModel": "gpt-5.6-luna",
       "apiKey": "",
+      "enableVideoDownload": false,
+      "maxVisionFrames": 8,
+      "storyboardFrames": 8,
+      "maxVideoBytes": 125829120,
       "openaiApiKey": "",
       "topics": [
         "Minecraft survival base design rooms decoration",
@@ -187,7 +206,12 @@
         "Minecraft item sorter storage room tutorial",
         "Minecraft villager trading hall tutorial",
         "Minecraft starter base build ideas survival"
-      ]
+      ],
+      "youtubeEnabled": true,
+      "visualAnalysisEnabled": true,
+      "openaiVisionModel": "gpt-5.6-luna",
+      "thumbnailQuality": "maxresdefault",
+      "maxAnalysisChars": 50000
     },
     "learningBuilds": {
       "enabled": true,
@@ -198,7 +222,20 @@
         "Minecraft item sorter storage room tutorial",
         "Minecraft survival base design rooms decoration",
         "Minecraft starter base build ideas survival"
-      ]
+      ],
+      "executeLearnedBlueprint": true,
+      "researchBeforeBuild": true,
+      "maxPlacements": 10000,
+      "materialMultiplier": 1,
+      "maxRecipeDepth": 8
+    },
+    "acquisition": {
+      "enabled": true,
+      "refreshHours": 24,
+      "maxDepth": 8,
+      "defaultCount": 1,
+      "fullGraph": true,
+      "recordOutcomes": true
     }
   },
   "combat": {

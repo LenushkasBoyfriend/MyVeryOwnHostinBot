@@ -21,6 +21,7 @@ const http = require('http');
 const { URL } = require('url');
 const { loadState, saveState } = require('./state');
 const { log, sleep } = require('./utils');
+const videoVision = require('./videoVision');
 
 const KNOWLEDGE_FILE = path.join(__dirname, '..', 'knowledge_base.json');
 
@@ -167,7 +168,7 @@ async function analyzeWithOpenAI(content, meta, cfg = {}) {
   const apiKey = cfg.openaiApiKey || process.env.OPENAI_API_KEY;
   if (!apiKey || !content) return null;
   const model = cfg.openaiModel || 'gpt-5.6-luna';
-  const prompt = `You are the knowledge analyst for a Minecraft survival agent.\nExtract only actionable, testable facts from the supplied source. Return JSON with: summary, prerequisites[], steps[], materials[], versionHints[], risks[], metrics[], confidence(0-1), tags[].\nDo not invent facts. Mark uncertain claims as risks or low confidence. Source title: ${meta.title || ''}\nURL: ${meta.url || ''}\nCONTENT:\n${content.slice(0, cfg.maxAnalysisChars || 50000)}`;
+  const prompt = `You are the technical knowledge analyst for a Minecraft survival agent.\nExtract only actionable, testable facts from the supplied source. Return JSON only with: summary, prerequisites[], steps[], materials[], versionHints[], risks[], metrics[], confidence(0-1), tags[], dimensions{width,length,height}, blockPlacements[{x,y,z,block}], layoutRules[], checkpoints[], verificationSteps[], failureModes[].\nFor farms/builds, explicitly distinguish confirmed facts from uncertain geometry. Never invent hidden blocks or coordinates. If exact 3-D coordinates are not supported by the source, return an empty blockPlacements array and explain the missing geometry in risks. Source title: ${meta.title || ''}\nURL: ${meta.url || ''}\nCONTENT:\n${content.slice(0, cfg.maxAnalysisChars || 50000)}`;
   const payload = JSON.stringify({ model, input: prompt });
   const json = await new Promise((resolve, reject) => {
     const req = https.request('https://api.openai.com/v1/responses', {
@@ -199,12 +200,20 @@ async function learnFromVideo(urlOrId, cfg = {}) {
   const caption = await getYoutubeCaptions(id);
   const facts = extractMinecraftFacts(caption.text, meta.title);
   const ai = await analyzeWithOpenAI(caption.text, meta, cfg);
+  const visual = await videoVision.analyzeVideoVisually(meta, caption.text, cfg);
+  const mergedAnalysis = ai || { summary: caption.text.slice(0, 2500), prerequisites: [], steps: [], risks: [], versionHints: [], metrics: [], confidence: caption.available ? 0.55 : 0.2, dimensions: { width: 0, length: 0, height: 0 }, blockPlacements: [], layoutRules: [], checkpoints: [], verificationSteps: [], failureModes: [] };
+  if (visual?.vision) {
+    mergedAnalysis.visualConfidence = Number(visual.vision.visualConfidence || 0);
+    mergedAnalysis.visualFindings = visual.vision;
+    mergedAnalysis.confidence = Math.min(1, (Number(mergedAnalysis.confidence || 0) * 0.7) + (Number(mergedAnalysis.visualConfidence || 0) * 0.3));
+  }
   const merged = {
     id, url: meta.url, title: meta.title, sourceType: 'youtube', learnedAt: Date.now(),
-    transcriptLanguage: caption.language, transcriptAvailable: caption.available,
+    transcriptLanguage: caption.language, transcriptAvailable: caption.available, visualAvailable: !!visual?.available,
+    visual,
     tags: Array.from(new Set([...(facts.tags || []), ...((ai && ai.tags) || [])])),
     materials: Array.from(new Set([...(facts.materials || []), ...((ai && ai.materials) || [])])),
-    analysis: ai || { summary: caption.text.slice(0, 2500), prerequisites: [], steps: [], risks: [], versionHints: [], metrics: [], confidence: caption.available ? 0.55 : 0.2 }
+    analysis: mergedAnalysis
   };
   const db = loadKnowledge();
   db.sources[id] = merged;
@@ -225,7 +234,8 @@ async function learnTopic(topic, cfg = {}) {
   // and recency signal. Then try a few candidates instead of blindly taking the first result.
   const candidates = videos.map(v => ({ ...v, score: scoreVideo(v, topic) })).sort((a, b) => b.score - a.score);
   let lastErr = null;
-  for (const candidate of candidates.slice(0, Math.min(5, candidates.length))) {
+  const learnedSources = [];
+  for (const candidate of candidates.slice(0, Math.min(4, candidates.length))) {
     try {
       const learned = await learnFromVideo(candidate.url, cfg);
       learned.title = candidate.title || learned.title;
@@ -233,12 +243,20 @@ async function learnTopic(topic, cfg = {}) {
       learned.selectionScore = candidate.score;
       const db = loadKnowledge();
       db.sources[candidate.id] = { ...db.sources[candidate.id], ...learned };
+      learnedSources.push(db.sources[candidate.id]);
       saveKnowledge(db);
-      return learned;
     } catch (e) { lastErr = e; }
     await sleep(150);
   }
-  throw lastErr || new Error('Video öğrenilemedi.');
+  if (!learnedSources.length) throw lastErr || new Error('Video öğrenilemedi.');
+  // Fuse the best few sources: independent agreement increases confidence; conflicting claims become risks.
+  const best = learnedSources.slice().sort((a, b) => Number(b.analysis?.confidence || 0) - Number(a.analysis?.confidence || 0))[0];
+  const allTags = Array.from(new Set(learnedSources.flatMap(x => x.tags || [])));
+  const allMaterials = Array.from(new Set(learnedSources.flatMap(x => x.materials || [])));
+  const allSteps = Array.from(new Set(learnedSources.flatMap(x => (x.analysis?.steps || []).map(st => typeof st === 'string' ? st : JSON.stringify(st))))).slice(0, 120);
+  const averageConfidence = learnedSources.reduce((n, x) => n + Number(x.analysis?.confidence || 0), 0) / learnedSources.length;
+  const fused = { ...best, tags: allTags, materials: allMaterials, corroboratedSources: learnedSources.map(x => x.id), analysis: { ...best.analysis, steps: allSteps, confidence: Math.min(1, averageConfidence + Math.min(0.15, (learnedSources.length - 1) * 0.05)), sourceCount: learnedSources.length } };
+  return fused;
 }
 
 function scoreVideo(video, topic) {
@@ -287,5 +305,5 @@ async function autonomousResearch(topic, cfg = {}) {
 
 module.exports = {
   loadKnowledge, saveKnowledge, searchYouTube, getYoutubeCaptions, learnFromVideo, learnTopic,
-  getKnowledge, recordExperiment, autonomousResearch, extractMinecraftFacts
+  getKnowledge, recordExperiment, autonomousResearch, extractMinecraftFacts, scoreVideo
 };

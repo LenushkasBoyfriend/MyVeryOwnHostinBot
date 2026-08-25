@@ -16,6 +16,9 @@ const { loadState, saveState } = require('./state');
 const knowledge = require('./knowledgeEngine');
 const acquisition = require('./acquisitionEngine');
 const gathering = require('./gathering');
+const farmPlanner = require('./farmPlanner');
+const farmExecutor = require('./farmExecutor');
+const videoResearch = require('./videoResearch');
 
 function pickLearnedSource(topic, tag) {
   const db = knowledge.getKnowledge(topic || '');
@@ -177,19 +180,33 @@ async function executeTemplate(bot, mcData, template, base, cfg = {}) {
 }
 
 async function learnPlanBuild(bot, mcData, topic, cfg = {}) {
-  const source = pickLearnedSource(topic, cfg.tag);
-  if (!source) return { success: false, reason: 'No learned source available' };
-  const template = templateFromSource(source);
-  const materials = materialPlanFromSource(source);
+  let source = pickLearnedSource(topic, cfg.tag);
+  let research = null;
+  if (!source && cfg.researchBeforeBuild !== false) {
+    try {
+      research = await videoResearch.researchTopic(topic, cfg.knowledge || {});
+      if (research?.sources?.length) source = research.sources.slice().sort((a,b) => (b.evidenceScore || 0) - (a.evidenceScore || 0))[0];
+    } catch (_) {}
+  }
+  if (!source) return { success: false, reason: 'No learned source available', research };
+  const farmPlan = /farm/i.test(topic || '') || (source.tags || []).some(t => /farm/i.test(t)) ? farmPlanner.normalizeFarmPlan(source, topic) : null;
+  const template = farmPlan ? (farmPlan.type === 'crop' ? 'learned-farm' : templateFromSource(source)) : templateFromSource(source);
+  const materials = farmPlan ? Object.keys(farmPlanner.estimateMaterials(farmPlan, cfg.materialMultiplier || 1)) : materialPlanFromSource(source);
   const gathered = await gatherMaterials(bot, mcData, materials.slice(0, cfg.maxMaterials || 12), 1);
   const state = loadState();
   const base = state.base;
   if (!base) return { success: false, reason: 'No base available', source: source.title, gathered };
-  const result = await executeTemplate(bot, mcData, template, base, cfg);
+  let result = await executeTemplate(bot, mcData, template, base, cfg);
+  if (farmPlan && farmPlan.blockPlacements?.length && cfg.executeLearnedBlueprint !== false) {
+    const blueprintOrigin = new Vec3(base.x + 12, base.y, base.z + 12);
+    const detailed = await farmExecutor.executeLearnedFarm(bot, mcData, farmPlan, base, { ...cfg, offsetX: 12, offsetZ: 12 });
+    result = { ...result, learnedBlueprint: detailed, strategy: farmPlanner.chooseFarmStrategy(farmPlan, { waterNearby: true, hasVillagers: false, darkArea: true }) };
+    farmPlanner.recordFarmOutcome(topic, result);
+  }
   const plan = {
     topic, template, sourceId: source.id, sourceTitle: source.title,
-    confidence: Number(source.analysis?.confidence || 0), materials, gathered,
-    result, plannedAt: Date.now()
+    confidence: Number(source.analysis?.confidence || 0), visualConfidence: Number(source.analysis?.visualConfidence || 0), materials, gathered,
+    farmPlan, result, plannedAt: Date.now()
   };
   state.learnedBuilds = state.learnedBuilds || { last: null, history: [] };
   state.learnedBuilds.last = plan;
