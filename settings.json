@@ -38,13 +38,13 @@
       "password": "login7921"
     },
     "anti-afk": {
-      "enabled": false,
-      "sneak": false
+      "enabled": true,
+      "sneak": true
     },
     "chat-messages": {
       "enabled": true,
       "repeat": true,
-      "repeat-delay": 120,
+      "repeat-delay": 240,
       "messages": [
         "End'i yedim ya da öyle bir şey oldu, hatırlamıyorum",
         "Bir gün bir sahabeydim ben de",
@@ -84,16 +84,16 @@
   "movement": {
     "enabled": true,
     "circle-walk": {
-      "enabled": false,
-      "radius": 4,
+      "enabled": true,
+      "radius": 1000,
       "speed": 3000
     },
     "look-around": {
-      "enabled": false,
+      "enabled": true,
       "interval": 5000
     },
     "random-jump": {
-      "enabled": false,
+      "enabled": true,
       "interval": 10000
     },
     "recovery": {
@@ -135,17 +135,17 @@
     "base": {
       "enabled": true,
       "searchRadius": [
-        60,
-        150
+        200,
+        200
       ],
       "depthBelowSurface": [
-        15,
-        25
+        25,
+        35
       ],
       "roomSize": {
-        "w": 7,
-        "h": 5,
-        "l": 7
+        "w": 10,
+        "h": 6,
+        "l": 10
       },
       "buildRooms": true,
       "decorate": true,
@@ -160,15 +160,15 @@
       "enabled": true,
       "logScores": true,
       "thinkDelay": false,
-      "thinkMinMs": 300,
-      "thinkMaxMs": 900,
+      "thinkMinMs": 50,
+      "thinkMaxMs": 100,
       "imperfectionChance": 0.08,
       "moodMessages": false,
       "moodCooldownMs": 120000
     },
     "memory": {
       "enabled": true,
-      "maxEvents": 250
+      "maxEvents": 500
     },
     "home": {
       "enabled": true,
@@ -179,13 +179,13 @@
       "repairBeforeReplace": true,
       "keepBackupTools": true,
       "generalRecipes": true,
-      "maxRecipeDepth": 5
+      "maxRecipeDepth": 500
     },
     "storage": {
       "enabled": true,
       "criticalEmptySlots": 2,
       "organizeChests": true,
-      "radius": 12,
+      "radius": 20,
       "categories": [
         "food",
         "ores",
@@ -196,7 +196,7 @@
         "blocks",
         "misc"
       ],
-      "autoSortMinutes": 20
+      "autoSortMinutes": 10
     },
     "safety": {
       "avoidRiskyExplorationAtNight": true
@@ -204,7 +204,7 @@
     "farming": {
       "enabled": true,
       "preferredCrop": "wheat",
-      "radius": 10
+      "radius": 50
     },
     "knowledge": {
       "enabled": true,
@@ -281,7 +281,7 @@
   "chat": {
     "respond": true,
     "tpWhitelist": [
-      "KagiMBot"
+      "MahalleninDelisi"
     ]
   }
 }
