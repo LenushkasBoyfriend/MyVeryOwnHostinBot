@@ -463,10 +463,14 @@ function createBot() {
 
       const mcData = require('minecraft-data')(bot.version);
       const defaultMove = new Movements(bot, mcData);
-      defaultMove.allowFreeMotion = false;
-      defaultMove.canDig = false;
-      defaultMove.liquidCost = 1000;
-      defaultMove.fallDamageCost = 1000;
+      defaultMove.allowFreeMotion = true;
+      defaultMove.canDig = true;
+      defaultMove.liquidCost = 8;
+      defaultMove.fallDamageCost = 40;
+      // Survival movement: let pathfinder break soft blocks and climb small obstacles.
+      defaultMove.maxDropDown = 2;
+      defaultMove.allow1by1towers = false;
+      console.log(`[Pathfinder] ready: canDig=${defaultMove.canDig}, allowFreeMotion=${defaultMove.allowFreeMotion}, maxDropDown=${defaultMove.maxDropDown}`);
 
       initializeModules(bot, mcData, defaultMove, authPassword);
 

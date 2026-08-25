@@ -82,7 +82,7 @@
     "max-reconnect-delay": 120000
   },
   "movement": {
-    "enabled": false,
+    "enabled": true,
     "circle-walk": {
       "enabled": false,
       "radius": 4,
@@ -95,6 +95,12 @@
     "random-jump": {
       "enabled": false,
       "interval": 10000
+    },
+    "recovery": {
+      "enabled": true,
+      "retries": 3,
+      "timeoutMs": 12000,
+      "stuckMs": 7000
     }
   },
   "modules": {
@@ -107,7 +113,7 @@
   },
   "survivalAI": {
     "enabled": true,
-    "interval": 4000,
+    "interval": 3000,
     "gather": {
       "woodTarget": 20,
       "cobbleTarget": 32
@@ -141,7 +147,7 @@
     "decision": {
       "enabled": true,
       "logScores": true,
-      "thinkDelay": true,
+      "thinkDelay": false,
       "thinkMinMs": 300,
       "thinkMaxMs": 900,
       "imperfectionChance": 0.08,

@@ -39,6 +39,9 @@ function start(bot, mcData, config, addInterval) {
   let currentEpisode = null;
   let lastMoodAt = 0;
   let researchBusy = false;
+  bot.__v12Movement = { retries: (config.movement?.recovery?.retries || 3), timeoutMs: (config.movement?.recovery?.timeoutMs || 12000) };
+  let lastPos = bot.entity?.position?.clone?.() || null;
+  let lastMovedAt = Date.now();
   log('SurvivalAI', 'Survival Brain v4 başlatıldı: otonom karar + deneyim + hedef + alışkanlık + çiftçilik + bilgi öğrenimi + bilinçli self-model.');
   try {
     const state = loadState();
@@ -59,6 +62,16 @@ function start(bot, mcData, config, addInterval) {
 
   return addInterval(async () => {
     if (!bot || !bot.entity || busy) return;
+    // Detect a frozen bot before launching another long task.
+    if (lastPos && bot.entity.position.distanceTo(lastPos) > 0.25) { lastMovedAt = Date.now(); }
+    lastPos = bot.entity.position.clone();
+    if (Date.now() - lastMovedAt > (cfg.movement?.recovery?.stuckMs || 7000)) {
+      try { bot.pathfinder.stop(); } catch (_) {}
+      try { bot.setControlState('jump', true); bot.setControlState('forward', true); } catch (_) {}
+      setTimeout(() => { try { bot.setControlState('jump', false); bot.setControlState('forward', false); } catch (_) {} }, 500);
+      lastMovedAt = Date.now();
+      log('SurvivalAI', 'Stuck watchdog: hareket kilidi temizlendi.');
+    }
     busy = true;
     try {
       const decisionCfg = cfg.decision || {};

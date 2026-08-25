@@ -538,3 +538,12 @@ This build pins the primary client protocol to `1.21.11` and keeps `1.21.4` as a
 The previous `package-lock.json` was removed because it pinned an older Mineflayer/minecraft-protocol stack. The deployment platform must run `npm install` (Node.js 22+) to generate a fresh lockfile from the updated dependency ranges.
 
 Useful settings are under `server.protocol-fallback` in `settings.json`.
+
+
+## v12 Movement/Gathering Fixes
+- Pathfinder digging enabled.
+- Movement retries and stuck recovery added.
+- `gotoPos` no longer aborts on the first transient `noPath`.
+- Wood/stone gathering retries and wanders instead of idling.
+- Mining corridor chooses alternate directions when blocked.
+- Survival AI now has a movement watchdog.
