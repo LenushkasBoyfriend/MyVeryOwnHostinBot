@@ -207,16 +207,12 @@
       "radius": 10
     },
     "knowledge": {
-      "enabled": true,
+      "enabled": false,
       "intervalMs": 2700000,
       "maxResults": 10,
-      "openaiModel": "gpt-5.6-luna",
-      "apiKey": "",
-      "enableVideoDownload": false,
       "maxVisionFrames": 8,
       "storyboardFrames": 8,
       "maxVideoBytes": 125829120,
-      "openaiApiKey": "",
       "topics": [
         "Minecraft survival base design rooms decoration",
         "Minecraft iron farm tutorial survival",
@@ -227,8 +223,6 @@
         "Minecraft starter base build ideas survival"
       ],
       "youtubeEnabled": true,
-      "visualAnalysisEnabled": true,
-      "openaiVisionModel": "gpt-5.6-luna",
       "thumbnailQuality": "maxresdefault",
       "maxAnalysisChars": 50000
     },
@@ -243,7 +237,7 @@
         "Minecraft starter base build ideas survival"
       ],
       "executeLearnedBlueprint": true,
-      "researchBeforeBuild": true,
+      "researchBeforeBuild": false,
       "maxPlacements": 10000,
       "materialMultiplier": 1,
       "maxRecipeDepth": 8

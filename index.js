@@ -562,6 +562,16 @@ function scheduleReconnect() {
 function initializeModules(bot, mcData, defaultMove, authPassword) {
   console.log('[Modules] Initializing...');
 
+  // IMPORTANT: pathfinder movements must always be installed, even when the
+  // optional fixed-position module is disabled. Without this, GoalNear/GoalBlock
+  // can be assigned but the pathfinder has no movement profile to execute.
+  try {
+    bot.pathfinder.setMovements(defaultMove);
+    console.log('[Pathfinder] Movement profile installed for all navigation tasks.');
+  } catch (e) {
+    console.log('[Pathfinder] Failed to install movement profile:', e.message);
+  }
+
   if (config.utils['auto-auth']?.enabled && authPassword) {
     let authHandled = false;
 

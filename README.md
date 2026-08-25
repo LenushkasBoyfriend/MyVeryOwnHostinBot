@@ -463,9 +463,9 @@ Dedicated category chests are created and used for food, ores/resources, buildin
 The bot can generate a local knowledge map for the items exposed by `minecraft-data`, including which items have recipes and which ones require exploration/collection rather than direct crafting. `item <item_name>` prints an acquisition plan through recursive recipe dependencies.
 
 ### External learning
-The Knowledge Brain can search YouTube, select relevant videos, retrieve available captions, classify Minecraft techniques, and optionally ask an OpenAI Responses API model to turn the transcript into structured, testable knowledge. Learned sources and topic confidence are stored locally.
+The Knowledge Brain can search YouTube, select relevant videos, retrieve available captions, classify Minecraft techniques, and optionally ask an harici LLM API model to turn the transcript into structured, testable knowledge. Learned sources and topic confidence are stored locally.
 
-Configure `survivalAI.knowledge.apiKey` for YouTube Data API use, or leave it blank to allow the best-effort public-page fallback. Configure `OPENAI_API_KEY` (or `survivalAI.knowledge.openaiApiKey`) to enable model-assisted analysis. YouTube and API providers still impose their own quotas, rate limits and terms; there is no honest way to promise literally unlimited remote access.
+Configure `survivalAI.knowledge.apiKey` for YouTube Data API use, or leave it blank to allow the best-effort public-page fallback. OpenAI/LLM entegrasyonu V14.2 itibarıyla kaldırılmıştır; bot kararlarını yerel kod, oyun durumu, tarifler, hafıza ve deney sonuçlarıyla verir.
 
 ### Self-awareness / consciousness note
 The bot now keeps a self-model: capabilities, current thought/plan, strengths, weaknesses and reflections. This is functional self-monitoring and decision-state tracking, not human consciousness or sentience.
@@ -498,7 +498,7 @@ Configuration lives under `survivalAI.learningBuilds` in `settings.json`.
 - `learnbuild` runs the normal research -> material preparation -> build -> verify -> experiment loop.
 
 ### V9 limitations
-Visual analysis requires an OpenAI API key and a vision-capable model configuration. Full raw-video frame extraction is not guaranteed; the current implementation uses the available transcript plus a YouTube thumbnail as a visual verifier. Arbitrary farms without verified 3-D coordinates are not blindly built. Live Minecraft integration still requires the project's normal runtime dependencies and an actual server connection.
+Görsel/LLM analizi V14.2 itibarıyla devre dışıdır; bot harici model anahtarı gerektirmez.
 
 
 ## V10 — Deep external learning + autonomous execution
@@ -528,7 +528,7 @@ The V10 layer adds three connected systems: video/storyboard research, detailed 
 - `farmauto <topic>`
 
 ### Important runtime limits
-Video downloading and external APIs require network access and their own provider limits/credentials. Visual analysis requires an appropriate OpenAI API key. Live Minecraft execution still depends on the configured Mineflayer version, server mechanics and available dependencies.
+Video downloading and external APIs require network access and their own provider limits/credentials. Visual analysis requires an appropriate harici LLM API key. Live Minecraft execution still depends on the configured Mineflayer version, server mechanics and available dependencies.
 
 
 ## Minecraft 1.21.11 + ViaVersion protocol compatibility

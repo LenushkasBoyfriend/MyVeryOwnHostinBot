@@ -18,7 +18,6 @@ const acquisition = require('./acquisitionEngine');
 const gathering = require('./gathering');
 const farmPlanner = require('./farmPlanner');
 const farmExecutor = require('./farmExecutor');
-const videoResearch = require('./videoResearch');
 
 function pickLearnedSource(topic, tag) {
   const db = knowledge.getKnowledge(topic || '');
@@ -181,14 +180,8 @@ async function executeTemplate(bot, mcData, template, base, cfg = {}) {
 
 async function learnPlanBuild(bot, mcData, topic, cfg = {}) {
   let source = pickLearnedSource(topic, cfg.tag);
-  let research = null;
-  if (!source && cfg.researchBeforeBuild !== false) {
-    try {
-      research = await videoResearch.researchTopic(topic, cfg.knowledge || {});
-      if (research?.sources?.length) source = research.sources.slice().sort((a,b) => (b.evidenceScore || 0) - (a.evidenceScore || 0))[0];
-    } catch (_) {}
-  }
-  if (!source) return { success: false, reason: 'No learned source available', research };
+  // V14.2: building decisions are local-only. Never fetch or ask an external AI.
+  if (!source) return { success: false, reason: 'No local learned source available; external AI research is disabled.' };
   const farmPlan = /farm/i.test(topic || '') || (source.tags || []).some(t => /farm/i.test(t)) ? farmPlanner.normalizeFarmPlan(source, topic) : null;
   const template = farmPlan ? (farmPlan.type === 'crop' ? 'learned-farm' : templateFromSource(source)) : templateFromSource(source);
   const materials = farmPlan ? Object.keys(farmPlanner.estimateMaterials(farmPlan, cfg.materialMultiplier || 1)) : materialPlanFromSource(source);
@@ -224,7 +217,6 @@ async function autonomousBuildCycle(bot, mcData, cfg = {}) {
   const nextTopic = topics.find(t => !last || t !== last.topic) || topics[0];
   try {
     const topicKnowledge = knowledge.getKnowledge(nextTopic);
-    if (!topicKnowledge.sources?.length) await knowledge.autonomousResearch(nextTopic, cfg.knowledge || {});
     return await learnPlanBuild(bot, mcData, nextTopic, cfg);
   } catch (e) {
     log('Builder', `Öğren→kur döngüsü başarısız: ${e.message}`);

@@ -5,7 +5,7 @@
  * - Searches YouTube using the official Data API when a key is configured.
  * - Falls back to lightweight YouTube result-page parsing when possible.
  * - Extracts available caption tracks from the video page.
- * - Optionally asks an OpenAI Responses API model to turn a transcript/article
+ * - Optionally asks an external AI Responses API model to turn a transcript/article
  *   into structured Minecraft knowledge.
  * - Stores knowledge locally so the bot keeps what it learned.
  *
@@ -21,7 +21,6 @@ const http = require('http');
 const { URL } = require('url');
 const { loadState, saveState } = require('./state');
 const { log, sleep } = require('./utils');
-const videoVision = require('./videoVision');
 
 const KNOWLEDGE_FILE = path.join(__dirname, '..', 'knowledge_base.json');
 
@@ -164,56 +163,24 @@ function extractMinecraftFacts(text, title = '') {
   return { tags, materials };
 }
 
-async function analyzeWithOpenAI(content, meta, cfg = {}) {
-  const apiKey = cfg.openaiApiKey || process.env.OPENAI_API_KEY;
-  if (!apiKey || !content) return null;
-  const model = cfg.openaiModel || 'gpt-5.6-luna';
-  const prompt = `You are the technical knowledge analyst for a Minecraft survival agent.\nExtract only actionable, testable facts from the supplied source. Return JSON only with: summary, prerequisites[], steps[], materials[], versionHints[], risks[], metrics[], confidence(0-1), tags[], dimensions{width,length,height}, blockPlacements[{x,y,z,block}], layoutRules[], checkpoints[], verificationSteps[], failureModes[].\nFor farms/builds, explicitly distinguish confirmed facts from uncertain geometry. Never invent hidden blocks or coordinates. If exact 3-D coordinates are not supported by the source, return an empty blockPlacements array and explain the missing geometry in risks. Source title: ${meta.title || ''}\nURL: ${meta.url || ''}\nCONTENT:\n${content.slice(0, cfg.maxAnalysisChars || 50000)}`;
-  const payload = JSON.stringify({ model, input: prompt });
-  const json = await new Promise((resolve, reject) => {
-    const req = https.request('https://api.openai.com/v1/responses', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}`, 'Content-Length': Buffer.byteLength(payload) }
-    }, res => {
-      let body = '';
-      res.setEncoding('utf8');
-      res.on('data', c => { body += c; });
-      res.on('end', () => {
-        if (res.statusCode >= 400) return reject(new Error(`OpenAI HTTP ${res.statusCode}: ${body.slice(0, 300)}`));
-        try { resolve(JSON.parse(body)); } catch (e) { reject(e); }
-      });
-    });
-    req.setTimeout(60000, () => req.destroy(new Error('OpenAI timeout')));
-    req.on('error', reject);
-    req.write(payload); req.end();
-  });
-  const text = json.output_text || (json.output || []).flatMap(x => x.content || []).map(x => x.text || '').join('\n');
-  if (!text) return null;
-  try { return JSON.parse(text); } catch (_) {
-    return { summary: text.slice(0, 5000), prerequisites: [], steps: [], materials: [], versionHints: [], risks: ['Model returned non-JSON output'], metrics: [], confidence: 0.4, tags: [] };
-  }
-}
-
 async function learnFromVideo(urlOrId, cfg = {}) {
   const id = extractYoutubeId(urlOrId);
   if (!id) throw new Error('YouTube video ID bulunamadı.');
   const meta = { id, url: `https://www.youtube.com/watch?v=${id}`, title: `YouTube ${id}` };
   const caption = await getYoutubeCaptions(id);
   const facts = extractMinecraftFacts(caption.text, meta.title);
-  const ai = await analyzeWithOpenAI(caption.text, meta, cfg);
-  const visual = await videoVision.analyzeVideoVisually(meta, caption.text, cfg);
-  const mergedAnalysis = ai || { summary: caption.text.slice(0, 2500), prerequisites: [], steps: [], risks: [], versionHints: [], metrics: [], confidence: caption.available ? 0.55 : 0.2, dimensions: { width: 0, length: 0, height: 0 }, blockPlacements: [], layoutRules: [], checkpoints: [], verificationSteps: [], failureModes: [] };
-  if (visual?.vision) {
-    mergedAnalysis.visualConfidence = Number(visual.vision.visualConfidence || 0);
-    mergedAnalysis.visualFindings = visual.vision;
-    mergedAnalysis.confidence = Math.min(1, (Number(mergedAnalysis.confidence || 0) * 0.7) + (Number(mergedAnalysis.visualConfidence || 0) * 0.3));
-  }
+  const summary = caption.text ? caption.text.slice(0, 2500) : 'Kaynak metni bulunamadı; yalnızca başlık/yerel kurallar kullanılabilir.';
+  const analysis = {
+    summary, prerequisites: [], steps: [],
+    materials: facts.materials || [], versionHints: [], risks: caption.available ? [] : ['Transcript unavailable; no model-based interpretation is used.'],
+    metrics: [], confidence: caption.available ? 0.55 : 0.15,
+    dimensions: { width: 0, length: 0, height: 0 }, blockPlacements: [], layoutRules: [],
+    checkpoints: [], verificationSteps: [], failureModes: [], tags: facts.tags || []
+  };
   const merged = {
     id, url: meta.url, title: meta.title, sourceType: 'youtube', learnedAt: Date.now(),
-    transcriptLanguage: caption.language, transcriptAvailable: caption.available, visualAvailable: !!visual?.available,
-    visual,
-    tags: Array.from(new Set([...(facts.tags || []), ...((ai && ai.tags) || [])])),
-    materials: Array.from(new Set([...(facts.materials || []), ...((ai && ai.materials) || [])])),
-    analysis: mergedAnalysis
+    transcriptLanguage: caption.language, transcriptAvailable: caption.available, visualAvailable: false,
+    visual: null, tags: Array.from(new Set(facts.tags || [])), materials: Array.from(new Set(facts.materials || [])), analysis
   };
   const db = loadKnowledge();
   db.sources[id] = merged;
@@ -293,14 +260,12 @@ function recordExperiment(topic, result = {}) {
 }
 
 async function autonomousResearch(topic, cfg = {}) {
-  try {
-    const learned = await learnTopic(topic, cfg);
-    log('Knowledge', `Öğrenildi: ${learned.title || topic}`);
-    return learned;
-  } catch (e) {
-    log('Knowledge', `Araştırma başarısız (${topic}): ${e.message}`);
-    return null;
-  }
+  // V14.2 is fully self-contained: no external AI or external model is used.
+  // Knowledge can only come from the local knowledge_base.json and in-game experiments.
+  const local = getKnowledge(topic);
+  if (local.sources?.length) return local.sources[local.sources.length - 1];
+  log('Knowledge', `Harici AI araştırması devre dışı: ${topic}`);
+  return null;
 }
 
 module.exports = {

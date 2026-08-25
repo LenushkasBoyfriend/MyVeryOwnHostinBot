@@ -40,7 +40,6 @@ function start(bot, mcData, config, addInterval) {
   let busy = false;
   let currentEpisode = null;
   let lastMoodAt = 0;
-  let researchBusy = false;
   bot.__v12Movement = { retries: (config.movement?.recovery?.retries || 3), timeoutMs: (config.movement?.recovery?.timeoutMs || 12000) };
   let lastPos = bot.entity?.position?.clone?.() || null;
   let lastMovedAt = Date.now();
@@ -67,7 +66,8 @@ function start(bot, mcData, config, addInterval) {
     // Detect a frozen bot before launching another long task.
     if (lastPos && bot.entity.position.distanceTo(lastPos) > 0.25) { lastMovedAt = Date.now(); }
     lastPos = bot.entity.position.clone();
-    if (Date.now() - lastMovedAt > (config.movement?.recovery?.stuckMs || 7000)) {
+    const hasActiveGoal = !!bot.pathfinder?.goal;
+    if (!hasActiveGoal && Date.now() - lastMovedAt > (config.movement?.recovery?.stuckMs || 7000)) {
       // Never force W+JUMP. Clear controls and let the pathfinder choose a
       // fresh local route instead.
       const { stopMotion, Vec3, sleep: movementSleep } = require('./utils');
@@ -98,23 +98,7 @@ function start(bot, mcData, config, addInterval) {
       const thinkMax = decisionCfg.thinkMaxMs == null ? 900 : decisionCfg.thinkMaxMs;
       const goal = brain.chooseGoal(bot, cfg);
       selfAwareness.reflect(bot, mcData, { goal: goal.name, reason: goal.reason, plan: 'evaluate->prepare->act->measure->learn' });
-      // External knowledge is a slow background thought, not something the bot spams every tick.
-      const knowledgeCfg = cfg.knowledge || {};
-      if (knowledgeCfg.enabled !== false && !researchBusy && Date.now() - (loadState().knowledge?.lastResearchAt || 0) > (knowledgeCfg.intervalMs || 45 * 60 * 1000)) {
-        researchBusy = true;
-        const topics = knowledgeCfg.topics || ['Minecraft survival base design rooms', 'Minecraft iron farm tutorial', 'Minecraft automatic food farm tutorial', 'Minecraft item sorter storage tutorial'];
-        const topic = topics[Math.floor(Math.random() * topics.length)];
-        setImmediate(async () => {
-          try {
-            const learned = await knowledge.autonomousResearch(topic, knowledgeCfg);
-            const st = loadState();
-            st.knowledge = st.knowledge || { version: 1, learnedTopics: {}, lastResearchAt: 0 };
-            st.knowledge.lastResearchAt = Date.now();
-            if (learned) st.knowledge.learnedTopics[topic] = { title: learned.title, tags: learned.tags, at: Date.now(), confidence: learned.analysis?.confidence || 0 };
-            saveState(st);
-          } finally { researchBusy = false; }
-        });
-      }
+      // External AI research is disabled; decisions use local code, memory and in-game state.
       if (decisionCfg.thinkDelay !== false) {
         const delay = thinkMin + Math.floor(Math.random() * Math.max(1, thinkMax - thinkMin + 1));
         await wait(delay);
@@ -343,16 +327,7 @@ async function runGoal(bot, mcData, cfg, goal) {
       return;
 
     case 'research':
-      {
-        const knowledgeCfg = cfg.knowledge || {};
-        const topics = knowledgeCfg.topics || ['Minecraft survival base design rooms', 'Minecraft iron farm tutorial', 'Minecraft automatic food farm tutorial'];
-        const learned = await knowledge.autonomousResearch(topics[Math.floor(Math.random() * topics.length)], knowledgeCfg);
-        const st = loadState();
-        st.knowledge = st.knowledge || { version: 1, learnedTopics: {}, lastResearchAt: 0 };
-        st.knowledge.lastResearchAt = Date.now();
-        if (learned) { const key = topics.find(t => (learned.tags || []).some(tag => t.toLowerCase().includes(tag.split('-')[0]))) || topics[0]; st.knowledge.learnedTopics[key] = { title: learned.title, tags: learned.tags, at: Date.now(), confidence: learned.analysis?.confidence || 0 }; }
-        saveState(st);
-      }
+      log('SurvivalAI', 'Research goal disabled: bot is fully self-contained.');
       return;
 
     case 'farming':

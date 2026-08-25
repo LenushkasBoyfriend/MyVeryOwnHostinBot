@@ -2,7 +2,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
 const { URL } = require('url');
 const { log } = require('./utils');
 const { spawnSync } = require('child_process');
@@ -56,38 +55,8 @@ async function fetchThumbnail(videoId, quality = 'maxresdefault') {
   }
 }
 
-async function analyzeImageWithOpenAI(imagePath, prompt, cfg = {}) {
-  const apiKey = cfg.openaiApiKey || process.env.OPENAI_API_KEY;
-  if (!apiKey || !imagePath || !fs.existsSync(imagePath)) return null;
-  const mime = imagePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
-  const data = fs.readFileSync(imagePath).toString('base64');
-  const payload = JSON.stringify({
-    model: cfg.openaiVisionModel || cfg.openaiModel || 'gpt-5.6-luna',
-    input: [{ role: 'user', content: [
-      { type: 'input_text', text: prompt },
-      { type: 'input_image', image_url: `data:${mime};base64,${data}` }
-    ] }]
-  });
-  return new Promise((resolve, reject) => {
-    const req = https.request('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, 'Content-Length': Buffer.byteLength(payload) }
-    }, res => {
-      let body = '';
-      res.setEncoding('utf8');
-      res.on('data', c => { body += c; });
-      res.on('end', () => {
-        if (res.statusCode >= 400) return reject(new Error(`OpenAI HTTP ${res.statusCode}: ${body.slice(0, 500)}`));
-        try {
-          const json = JSON.parse(body);
-          const text = json.output_text || (json.output || []).flatMap(x => x.content || []).map(x => x.text || '').join('\n');
-          resolve(text ? JSON.parse(text) : null);
-        } catch (e) { resolve(null); }
-      });
-    });
-    req.setTimeout(90000, () => req.destroy(new Error('OpenAI vision timeout')));
-    req.on('error', reject); req.write(payload); req.end();
-  });
+async function analyzeImageWithOpenAI() {
+  return null;
 }
 
 
@@ -115,33 +84,9 @@ function buildStoryboard(videoUrl, videoId, cfg = {}) {
   return fs.readdirSync(framesDir).filter(x => x.endsWith('.jpg')).sort().map(x => path.join(framesDir, x)).slice(0, frameCount);
 }
 
-async function analyzeVideoVisually(video, transcript, cfg = {}) {
-  const id = extractVideoId(video?.id || video?.url || video);
-  const storyboard = buildStoryboard(video?.url || `https://www.youtube.com/watch?v=${id}`, id, cfg);
-  const imagePath = storyboard[0] || await fetchThumbnail(id, cfg.thumbnailQuality || 'maxresdefault');
-  if (!imagePath) return { available: false, reason: 'visual-source-unavailable', storyboardFrames: [] };
-  const prompt = `Analyze this Minecraft build/farm screenshot as a visual verifier. Do not invent hidden details. Return JSON only with: style, palette[], visibleRooms[], visibleFunctionalBlocks[], apparentShape, symmetry, entranceStyle, decoration[], buildComplexity, visualConfidence(0-1), likelyUse, versionClues[]. Compare against transcript when supplied. Transcript excerpt: ${(transcript || '').slice(0, 12000)}`;
-  try {
-    const targets = storyboard.length ? storyboard : [imagePath];
-    const analyses = [];
-    for (const frame of targets.slice(0, Number(cfg.maxVisionFrames || 8))) {
-      const result = await analyzeImageWithOpenAI(frame, prompt, cfg);
-      if (result) analyses.push(result);
-    }
-    const merged = analyses.length ? {
-      ...analyses[0],
-      visualConfidence: analyses.reduce((n, x) => n + Number(x.visualConfidence || 0), 0) / analyses.length,
-      framesAnalyzed: analyses.length,
-      visibleRooms: Array.from(new Set(analyses.flatMap(x => x.visibleRooms || []))),
-      visibleFunctionalBlocks: Array.from(new Set(analyses.flatMap(x => x.visibleFunctionalBlocks || []))),
-      palette: Array.from(new Set(analyses.flatMap(x => x.palette || []))),
-      decoration: Array.from(new Set(analyses.flatMap(x => x.decoration || []))),
-      frameFindings: analyses
-    } : null;
-    return { available: true, imagePath, storyboardFrames: storyboard, vision: merged };
-  } catch (e) {
-    return { available: true, imagePath, storyboardFrames: storyboard, vision: null, error: e.message };
-  }
+async function analyzeVideoVisually() {
+  return { available: false, reason: 'external AI-disabled', storyboardFrames: [], vision: null };
 }
+
 
 module.exports = { extractVideoId, fetchThumbnail, analyzeVideoVisually };
