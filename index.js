@@ -651,21 +651,7 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
       }
     }, 120000 + Math.floor(Math.random() * 180000));
 
-    if (!(config.movement?.['circle-walk']?.enabled)) {
-      addInterval(() => {
-        if (!bot || !botState.connected || typeof bot.setControlState !== 'function') return;
-        try {
-          bot.look(Math.random() * Math.PI * 2, 0, true);
-          bot.setControlState('forward', true);
-          setTimeout(() => {
-            if (bot && typeof bot.setControlState === 'function') bot.setControlState('forward', false);
-          }, 500 + Math.floor(Math.random() * 1500));
-          botState.lastActivity = Date.now();
-        } catch (e) {
-          console.log('[AntiAFK] Walk error:', e.message);
-        }
-      }, 120000 + Math.floor(Math.random() * 360000));
-    }
+    // v14: no background forced-forward anti-AFK movement. Pathfinder owns navigation.
 
     if (config.utils['anti-afk'].sneak) {
       try {
@@ -691,7 +677,12 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
     avoidMobs(bot);
   }
   if (config.modules.combat) {
-    combatModule(bot, mcData);
+    try {
+      require('./modules/combatAI').start(bot, mcData, config, addInterval);
+    } catch (e) {
+      console.log('[CombatAI] Başlatma hatası, eski combatModule geri açılıyor:', e.message);
+      combatModule(bot, mcData);
+    }
   }
   if (config.modules.beds) {
     bedModule(bot, mcData);
@@ -799,6 +790,16 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
         const state = require('./modules/state').loadState();
         console.log('[Base]', state.baseDesign || {});
         console.log('[Base rooms]', bd.chooseRoomLayout(config.survivalAI?.base || {}));
+      } else if (trimmed === 'combatstatus') {
+        const st = require('./modules/state').loadState();
+        console.log('[Combat]', JSON.stringify(st.combat || {}, null, 2));
+      } else if (trimmed === 'miningstatus') {
+        const st = require('./modules/state').loadState();
+        console.log('[Mining]', JSON.stringify(st.mining || {}, null, 2));
+      } else if (trimmed === 'forcesurvival') {
+        require('./modules/survivalAI').runOneStep(bot, mcData, config.survivalAI || {})
+          .then(() => console.log('[SurvivalAI] Manual step complete.'))
+          .catch(e => console.log('[SurvivalAI] Manual step error:', e.message));
       } else {
         bot.chat(trimmed);
       }
@@ -833,18 +834,8 @@ function startCircleWalk(bot, defaultMove) {
 }
 
 function startRandomJump(bot) {
-  addInterval(() => {
-    if (!bot || !botState.connected || typeof bot.setControlState !== 'function') return;
-    try {
-      bot.setControlState('jump', true);
-      setTimeout(() => {
-        if (bot && typeof bot.setControlState === 'function') bot.setControlState('jump', false);
-      }, 300);
-      botState.lastActivity = Date.now();
-    } catch (e) {
-      console.log('[RandomJump] Error:', e.message);
-    }
-  }, config.movement['random-jump'].interval);
+  // v14: random jumping is intentionally disabled; pathfinder decides when a jump is needed.
+  return null;
 }
 
 function startLookAround(bot) {

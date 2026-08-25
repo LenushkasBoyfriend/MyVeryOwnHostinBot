@@ -1,7 +1,7 @@
 {
   "name": "AFK Bot",
   "bot-account": {
-    "username": "MahalleninDelisi",
+    "username": "Mahalle'nin Delisi",
     "password": "",
     "type": "offline"
   },
@@ -101,7 +101,8 @@
       "retries": 3,
       "timeoutMs": 12000,
       "stuckMs": 7000
-    }
+    },
+    "smart-jump": true
   },
   "modules": {
     "avoidMobs": true,
@@ -119,7 +120,17 @@
       "cobbleTarget": 32
     },
     "mining": {
-      "shaftYLevel": -58
+      "shaftYLevel": -58,
+      "branchMining": true,
+      "maxSteps": 420,
+      "targetCount": 20,
+      "torchInterval": 6,
+      "includeIron": true,
+      "includeCoal": true,
+      "targetY": -58,
+      "scanRadius": 20,
+      "avoidLavaRadius": 3,
+      "preferHighValue": true
     },
     "base": {
       "enabled": true,
@@ -137,7 +148,8 @@
         "l": 7
       },
       "buildRooms": true,
-      "decorate": true
+      "decorate": true,
+      "autoExpand": true
     },
     "enchanting": {
       "enabled": true,
@@ -183,7 +195,8 @@
         "redstone",
         "blocks",
         "misc"
-      ]
+      ],
+      "autoSortMinutes": 20
     },
     "safety": {
       "avoidRiskyExplorationAtNight": true
@@ -246,7 +259,11 @@
   },
   "combat": {
     "attack-mobs": true,
-    "auto-eat": true
+    "auto-eat": true,
+    "advanced": true,
+    "targetRange": 14,
+    "attackCooldownMs": 620,
+    "retreatHealth": 8
   },
   "beds": {
     "pick-up-day": false,
@@ -254,7 +271,7 @@
   },
   "discord": {
     "enabled": false,
-    "webhookUrl": "",
+    "webhookUrl": "YOUR_DISCORD_WEBHOOK_URL_HERE",
     "events": {
       "connect": true,
       "disconnect": true,

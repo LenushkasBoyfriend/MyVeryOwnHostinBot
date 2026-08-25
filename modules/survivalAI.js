@@ -19,6 +19,8 @@ const selfAwareness = require('./selfAwareness');
 const knowledge = require('./knowledgeEngine');
 const acquisition = require('./acquisitionEngine');
 const autonomousBuilder = require('./autonomousBuilder');
+const miningAI = require('./miningAI');
+const baseSystem = require('./baseSystem');
 
 const { sleep: wait } = require('./utils');
 
@@ -65,12 +67,29 @@ function start(bot, mcData, config, addInterval) {
     // Detect a frozen bot before launching another long task.
     if (lastPos && bot.entity.position.distanceTo(lastPos) > 0.25) { lastMovedAt = Date.now(); }
     lastPos = bot.entity.position.clone();
-    if (Date.now() - lastMovedAt > (cfg.movement?.recovery?.stuckMs || 7000)) {
+    if (Date.now() - lastMovedAt > (config.movement?.recovery?.stuckMs || 7000)) {
+      // Never force W+JUMP. Clear controls and let the pathfinder choose a
+      // fresh local route instead.
+      const { stopMotion, Vec3, sleep: movementSleep } = require('./utils');
+      stopMotion(bot);
       try { bot.pathfinder.stop(); } catch (_) {}
-      try { bot.setControlState('jump', true); bot.setControlState('forward', true); } catch (_) {}
-      setTimeout(() => { try { bot.setControlState('jump', false); bot.setControlState('forward', false); } catch (_) {} }, 500);
+      const dirs = [
+        new Vec3(2, 0, 0), new Vec3(-2, 0, 0),
+        new Vec3(0, 0, 2), new Vec3(0, 0, -2)
+      ].sort(() => Math.random() - 0.5);
+      const current = bot.entity.position.floored();
+      let recovered = false;
+      for (const d of dirs) {
+        const p = current.plus(d);
+        try {
+          bot.pathfinder.setGoal(new (require('mineflayer-pathfinder').goals.GoalNear)(p.x, p.y, p.z, 1));
+          await movementSleep(900);
+          if (bot.entity.position.distanceTo(current) > 0.7) { recovered = true; break; }
+        } catch (_) {}
+        try { bot.pathfinder.stop(); } catch (_) {}
+      }
       lastMovedAt = Date.now();
-      log('SurvivalAI', 'Stuck watchdog: hareket kilidi temizlendi.');
+      log('SurvivalAI', `Stuck watchdog: controls temizlendi, yeni yerel rota ${recovered ? 'bulundu' : 'denendi'}.`);
     }
     busy = true;
     try {
@@ -191,7 +210,7 @@ async function sleepIfPossible(bot) {
   } catch (_) { return false; }
 }
 
-async function deposit(bot, state, cfg) {
+async function deposit(bot, mcData, state, cfg) {
   if (!state.base) return false;
   try {
     await baseBuilder.enterBase(bot, state.base);
@@ -282,12 +301,33 @@ async function runGoal(bot, mcData, cfg, goal) {
 
     case 'mine':
     case 'progress':
-      await gathering.stripMineForOres(
-        bot, mcData,
-        [].concat(gathering.ORE_GROUPS.diamond, gathering.ORE_GROUPS.lapis, gathering.ORE_GROUPS.gold, gathering.ORE_GROUPS.redstone),
-        Math.max(6, 12 - countItem(bot, 'diamond')),
-        (cfg.mining || {}).shaftYLevel || -58, 220
-      );
+      if ((cfg.mining || {}).branchMining !== false) {
+        const result = await miningAI.branchMine(bot, mcData, {
+          targetY: (cfg.mining || {}).shaftYLevel || -58,
+          maxSteps: (cfg.mining || {}).maxSteps || 320,
+          targetCount: Math.max(6, (cfg.mining || {}).targetCount || 16),
+          torchInterval: (cfg.mining || {}).torchInterval || 8,
+          scanRadius: (cfg.mining || {}).scanRadius || 20,
+          avoidLavaRadius: (cfg.mining || {}).avoidLavaRadius || 3,
+          preferHighValue: (cfg.mining || {}).preferHighValue !== false,
+          includeIron: (cfg.mining || {}).includeIron !== false,
+          includeCoal: (cfg.mining || {}).includeCoal !== false,
+          ores: [].concat(gathering.ORE_GROUPS.diamond, gathering.ORE_GROUPS.lapis, gathering.ORE_GROUPS.gold, gathering.ORE_GROUPS.redstone)
+        });
+        const st = loadState();
+        st.mining = st.mining || { version: 1, sessions: 0, oresMined: 0, lastSessionAt: 0 };
+        st.mining.sessions = (st.mining.sessions || 0) + 1;
+        st.mining.oresMined = (st.mining.oresMined || 0) + (result.mined || 0);
+        st.mining.lastSessionAt = Date.now();
+        saveState(st);
+      } else {
+        await gathering.stripMineForOres(
+          bot, mcData,
+          [].concat(gathering.ORE_GROUPS.diamond, gathering.ORE_GROUPS.lapis, gathering.ORE_GROUPS.gold, gathering.ORE_GROUPS.redstone),
+          Math.max(6, 12 - countItem(bot, 'diamond')),
+          (cfg.mining || {}).shaftYLevel || -58, 220
+        );
+      }
       await inv.craftToolTier(bot, mcData, 'diamond');
       await inv.craftArmorTier(bot, mcData, 'diamond');
       return;
@@ -328,15 +368,19 @@ async function runGoal(bot, mcData, cfg, goal) {
         await baseBuilder.enterBase(bot, state.base);
         return;
       }
-      await buildOrFindHome(bot, mcData, cfg);
+      await baseSystem.ensureBaseAndStorage(bot, mcData, cfg);
       return;
 
     case 'find-home':
-      await buildOrFindHome(bot, mcData, cfg);
+      await baseSystem.ensureBaseAndStorage(bot, mcData, cfg);
       return;
 
     case 'storage':
-      await deposit(bot, state, cfg);
+      await deposit(bot, mcData, state, cfg);
+      return;
+
+    case 'base-maintenance':
+      await baseSystem.ensureBaseAndStorage(bot, mcData, cfg);
       return;
 
     case 'enchant':

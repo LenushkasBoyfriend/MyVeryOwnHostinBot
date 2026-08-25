@@ -15,22 +15,31 @@ function stopMotion(bot) {
 }
 
 async function directRecoveryWalk(bot, pos, maxMs = 1800) {
-  if (!bot?.entity || typeof bot.lookAt !== 'function' || typeof bot.setControlState !== 'function') return false;
+  // Recovery must never become a second movement controller.
+  // Pathfinder remains responsible for navigation; this helper only asks it
+  // to try a fresh small GoalNear from the current position.
+  if (!bot?.entity || !bot?.pathfinder || !pos) return false;
   const start = bot.entity.position.clone();
-  const started = Date.now();
-  try {
-    const target = new Vec3(pos.x, Math.max(pos.y, bot.entity.position.y), pos.z);
-    await bot.lookAt(target.offset(0, 0.8, 0), true);
-    bot.setControlState('forward', true);
-    bot.setControlState('jump', true);
-    while (Date.now() - started < maxMs) {
-      if (!bot.entity) break;
-      if (bot.entity.position.distanceTo(pos) <= 2.2) return true;
-      await sleep(150);
-    }
-  } catch (_) {
-  } finally {
-    stopMotion(bot);
+  const dirs = [
+    new Vec3(2, 0, 0), new Vec3(-2, 0, 0),
+    new Vec3(0, 0, 2), new Vec3(0, 0, -2)
+  ];
+  stopMotion(bot);
+  try { bot.pathfinder.stop(); } catch (_) {}
+
+  const shuffled = dirs.sort(() => Math.random() - 0.5);
+  for (const d of shuffled) {
+    const target = bot.entity.position.plus(d);
+    try {
+      bot.pathfinder.setGoal(new GoalNear(target.x, target.y, target.z, 1));
+      const started = Date.now();
+      while (Date.now() - started < maxMs) {
+        if (!bot?.entity) return false;
+        if (bot.entity.position.distanceTo(target) <= 1.5) return true;
+        await sleep(120);
+      }
+    } catch (_) {}
+    try { bot.pathfinder.stop(); } catch (_) {}
   }
   return bot.entity ? bot.entity.position.distanceTo(start) > 0.7 : false;
 }

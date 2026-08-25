@@ -62,6 +62,11 @@ function scoreGoals(bot, cfg, state) {
     add('base-development', 52, 'Base still has unfinished functional rooms.', 'base');
   }
 
+  if (state.base && cfg.base?.autoExpand !== false) {
+    const overdue = !state.storage?.lastSortAt || Date.now() - state.storage.lastSortAt > ((cfg.storage?.autoSortMinutes || 20) * 60 * 1000);
+    if (overdue) add('base-maintenance', 33, 'Home/storage maintenance is due.', 'base-maintenance');
+  }
+
   if (state.base && state.storage && Date.now() - (state.storage.lastSortAt || 0) > 20 * 60 * 1000) {
     add('storage-sort', 34, 'Storage should be organized.', 'storage');
   }

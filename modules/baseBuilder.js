@@ -386,7 +386,11 @@ module.exports = {
   exitBase,
   depositExtras,
   sealPosition,
-  pickBaseTarget
+  pickBaseTarget,
+  buildRooms,
+  organizeChests,
+  categoryFor,
+  ensureCategoryChests
 };
 
 // Odayı aşamalı inşa eder; her oda kendi planından, paletinden ve işlevinden oluşur.
@@ -503,7 +507,3 @@ async function organizeChests(bot, mcData, radius = 12) {
   saveState(state);
   return Object.keys(mapping).length > 0;
 }
-module.exports.buildRooms = buildRooms;
-module.exports.organizeChests = organizeChests;
-module.exports.categoryFor = categoryFor;
-module.exports.ensureCategoryChests = ensureCategoryChests;
