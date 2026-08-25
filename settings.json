@@ -13,7 +13,6 @@
     "protocol-fallback": {
       "enabled": true,
       "versions": [
-        "auto",
         "1.21.11",
         "1.21.4"
       ],
