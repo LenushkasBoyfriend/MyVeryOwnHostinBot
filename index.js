@@ -1,13 +1,13 @@
 'use strict';
 
 const mineflayer = require('mineflayer');
-const { pathfinder, goals } = require('mineflayer-pathfinder');
+const { Movements, pathfinder, goals } = require('mineflayer-pathfinder');
 const { GoalBlock } = goals;
-const movementController = require('./modules/movementController');
 const config = require('./settings.json');
 const playerMemory = require('./modules/playerMemory');
 const express = require('express');
 const experience = require('./modules/experienceEngine');
+const knowledge = require('./modules/knowledgeEngine');
 const http = require('http');
 const https = require('https');
 
@@ -17,43 +17,6 @@ const PORT = process.env.PORT || 5000;
 let bot = null;
 let activeIntervals = [];
 let reconnectTimeoutId = null;
-let protocolFallbackIndex = 0;
-let protocolFallbackCooldownUntil = 0;
-
-function getProtocolCandidates() {
-  const pf = config.server?.['protocol-fallback'];
-  if (!pf?.enabled) return [config.server?.version || ''];
-  const versions = Array.isArray(pf.versions) ? pf.versions.filter(Boolean) : [];
-  return versions.length ? versions : [config.server?.version || ''];
-}
-
-function getCurrentProtocolVersion() {
-  const candidates = getProtocolCandidates();
-  return candidates[Math.min(protocolFallbackIndex, candidates.length - 1)] || '';
-}
-
-function isProtocolFailure(reason) {
-  const text = String(reason || '').toLowerCase();
-  const markers = config.server?.['protocol-fallback']?.['switch-on-errors'];
-  if (!Array.isArray(markers) || markers.length === 0) {
-    return text.includes('serverbound/minecraft:hello') || text.includes('decoderexception') || text.includes('failed to decode packet');
-  }
-  return markers.some(marker => text.includes(String(marker).toLowerCase()));
-}
-
-function maybeRotateProtocol(reason) {
-  const candidates = getProtocolCandidates();
-  if (candidates.length < 2 || !isProtocolFailure(reason)) return false;
-  const now = Date.now();
-  if (now < protocolFallbackCooldownUntil) return false;
-  const old = getCurrentProtocolVersion();
-  protocolFallbackIndex = (protocolFallbackIndex + 1) % candidates.length;
-  const next = getCurrentProtocolVersion();
-  protocolFallbackCooldownUntil = now + (config.server?.['protocol-fallback']?.['cooldown-ms'] || 15000);
-  console.log(`[Protocol] Compatibility fallback: ${old || 'auto'} -> ${next || 'auto'}`);
-  console.log(`[Protocol] Reason: ${String(reason).slice(0, 300)}`);
-  return true;
-}
 let connectionTimeoutId = null;
 let isReconnecting = false;
 
@@ -301,8 +264,18 @@ app.get('/ping', (req, res) => res.send('pong'));
 app.get('/brain', (req, res) => {
   try {
     res.json({
-      learning: experience.getReport(15)
+      learning: experience.getReport(15),
+      knowledge: knowledge.getReport(15)
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+app.get('/knowledge', (req, res) => {
+  try {
+    res.json(knowledge.getReport(30));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -404,14 +377,11 @@ function createBot() {
   console.log(`[Bot] Connecting to ${config.server.ip}:${config.server.port}`);
 
   try {
-    const selectedVersion = getCurrentProtocolVersion();
-    const botVersion = selectedVersion && selectedVersion.trim() !== '' ? selectedVersion : false;
+    const botVersion = config.server.version && config.server.version.trim() !== '' ? config.server.version : false;
 
     const botUsername = process.env.BOT_USERNAME || config['bot-account'].username;
     const botPassword = process.env.BOT_PASSWORD || config['bot-account'].password || undefined;
     const authPassword = process.env.BOT_AUTH_PASSWORD || config.utils['auto-auth']?.password;
-
-    console.log(`[Protocol] Mineflayer ${require('mineflayer/package.json').version} | client version: ${botVersion || 'auto'} | fallback: ${getProtocolCandidates().join(' -> ')}`);
 
     bot = mineflayer.createBot({
       username: botUsername,
@@ -463,8 +433,11 @@ function createBot() {
       }
 
       const mcData = require('minecraft-data')(bot.version);
-      const defaultMove = movementController.install(bot, mcData, { canDig: true });
-      console.log('[Pathfinder] Conservative movement profile installed.');
+      const defaultMove = new Movements(bot, mcData);
+      defaultMove.allowFreeMotion = false;
+      defaultMove.canDig = false;
+      defaultMove.liquidCost = 1000;
+      defaultMove.fallDamageCost = 1000;
 
       initializeModules(bot, mcData, defaultMove, authPassword);
 
@@ -492,7 +465,6 @@ function createBot() {
       pushError({ type: 'kicked', reason: kickReason, time: Date.now() });
       clearAllIntervals();
 
-      maybeRotateProtocol(kickReason);
       const reasonStr = String(kickReason).toLowerCase();
       if (reasonStr.includes('throttl') || reasonStr.includes('wait before reconnect') || reasonStr.includes('too fast')) {
         console.log('[Bot] Throttle kick detected');
@@ -510,7 +482,6 @@ function createBot() {
       botState.connected = false;
       clearAllIntervals();
       spawnHandled = false;
-      maybeRotateProtocol(reason);
 
       if (config.discord?.events?.disconnect) {
         sendDiscordWebhook(`Disconnected: ${reason || 'Unknown'}`, 0xf87171);
@@ -522,7 +493,6 @@ function createBot() {
     bot.on('error', (err) => {
       console.log(`[Bot] Error: ${err.message}`);
       pushError({ type: 'error', message: err.message, time: Date.now() });
-      maybeRotateProtocol(err.message);
 
     });
 
@@ -555,16 +525,6 @@ function scheduleReconnect() {
 
 function initializeModules(bot, mcData, defaultMove, authPassword) {
   console.log('[Modules] Initializing...');
-
-  // IMPORTANT: pathfinder movements must always be installed, even when the
-  // optional fixed-position module is disabled. Without this, GoalNear/GoalBlock
-  // can be assigned but the pathfinder has no movement profile to execute.
-  try {
-    bot.pathfinder.setMovements(defaultMove);
-    console.log('[Pathfinder] Movement profile installed for all navigation tasks.');
-  } catch (e) {
-    console.log('[Pathfinder] Failed to install movement profile:', e.message);
-  }
 
   if (config.utils['auto-auth']?.enabled && authPassword) {
     let authHandled = false;
@@ -618,13 +578,18 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
     }
   }
 
-  if (config.position?.enabled && !(config.movement?.['circle-walk']?.enabled)) {
+  // Autonomous mode: the survival brain owns movement and decision-making.
+  // The old fixed-position navigation and fake AFK tricks are skipped entirely
+  // in this mode so they can't fight the pathfinder goals the brain sets.
+  const autonomous = !!config.modules.survivalAI;
+
+  if (!autonomous && config.position?.enabled && !(config.movement?.['circle-walk']?.enabled)) {
     bot.pathfinder.setMovements(defaultMove);
     bot.pathfinder.setGoal(new GoalBlock(config.position.x, config.position.y, config.position.z));
     console.log('[Position] Navigating to configured position...');
   }
 
-  if (config.utils['anti-afk']?.enabled && !config.modules.survivalAI) {
+  if (!autonomous && config.utils['anti-afk']?.enabled) {
 
     addInterval(() => {
       if (!bot || !botState.connected) return;
@@ -655,7 +620,21 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
       }
     }, 120000 + Math.floor(Math.random() * 180000));
 
-    // v14: no background forced-forward anti-AFK movement. Pathfinder owns navigation.
+    if (!(config.movement?.['circle-walk']?.enabled)) {
+      addInterval(() => {
+        if (!bot || !botState.connected || typeof bot.setControlState !== 'function') return;
+        try {
+          bot.look(Math.random() * Math.PI * 2, 0, true);
+          bot.setControlState('forward', true);
+          setTimeout(() => {
+            if (bot && typeof bot.setControlState === 'function') bot.setControlState('forward', false);
+          }, 500 + Math.floor(Math.random() * 1500));
+          botState.lastActivity = Date.now();
+        } catch (e) {
+          console.log('[AntiAFK] Walk error:', e.message);
+        }
+      }, 120000 + Math.floor(Math.random() * 360000));
+    }
 
     if (config.utils['anti-afk'].sneak) {
       try {
@@ -664,20 +643,24 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
     }
   }
 
-  if (config.movement?.enabled !== false) {
-    try {
-      movementController.start(bot, mcData, config, addInterval);
-    } catch (e) {
-      console.log('[Movement] Controller start failed:', e.message);
+  if (!autonomous && config.movement?.enabled !== false) {
+    if (config.movement?.['circle-walk']?.enabled) {
+      startCircleWalk(bot, defaultMove);
+    }
+
+    if (config.movement?.['random-jump']?.enabled && !(config.movement?.['circle-walk']?.enabled)) {
+      startRandomJump(bot);
+    }
+    if (config.movement?.['look-around']?.enabled) {
+      startLookAround(bot);
     }
   }
 
+  if (config.modules.avoidMobs && !config.modules.combat) {
+    avoidMobs(bot);
+  }
   if (config.modules.combat) {
-    try {
-      require('./modules/combatAI').start(bot, mcData, config, addInterval);
-    } catch (e) {
-      console.log('[CombatAI] Başlatma hatası:', e.message);
-    }
+    combatModule(bot, mcData);
   }
   if (config.modules.beds) {
     bedModule(bot, mcData);
@@ -688,10 +671,25 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
   if (config.modules.survivalAI) {
     try {
       require('./modules/survivalAI').start(bot, mcData, config, addInterval);
-      console.log('[SurvivalAI] Otonom karar sistemi aktif; sahte AFK hareketleri devre disi.');
     } catch (e) {
       console.log('[SurvivalAI] Başlatma hatası:', e.message);
     }
+  }
+
+  if (config.knowledge?.enabled !== false) {
+    const knowledgeTick = async () => {
+      if (!bot || !botState.connected) return;
+      try {
+        const result = await knowledge.autoLearn(require('./modules/decisionEngine').snapshot(bot), config);
+        if (result && !result.skipped) {
+          console.log(`[Knowledge] Learned topics: ${(result.topics || []).join(', ')}`);
+        }
+      } catch (e) {
+        console.log(`[Knowledge] Auto-learning error: ${e.message}`);
+      }
+    };
+    addInterval(knowledgeTick, 5 * 60 * 1000);
+    setTimeout(knowledgeTick, 20000);
   }
 
   if (config.utils['chat-log']) {
@@ -714,94 +712,185 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
         bot.chat('/' + trimmed.slice(4));
       } else if (trimmed === 'status') {
         console.log(`Connected: ${botState.connected}, Uptime: ${formatUptime(Math.floor((Date.now() - botState.startTime) / 1000))}`);
-      } else if (trimmed === 'brain') {
-        const sa = require('./modules/selfAwareness');
-        const state = require('./modules/state').loadState();
-        console.log('[Brain]', sa.statusLine(bot));
-        console.log('[Brain] goal:', state.lastDecision?.goal || 'idle', '| reason:', state.lastDecision?.reason || '-');
-        console.log('[Brain] farm:', state.farm || 'none');
-      } else if (trimmed === 'learned') {
-        const state = require('./modules/state').loadState();
-        console.log('[Learning] habits:', Object.keys(state.habits?.actions || {}).length, 'experience actions:', Object.keys(state.experience?.actions || {}).length);
-      } else if (trimmed === 'self') {
-        const sa = require('./modules/selfAwareness');
-        const state = require('./modules/state').loadState();
-        console.log('[Self]', sa.statusLine(bot));
-        console.log('[Self] capabilities:', state.awareness?.capabilities || {});
-        console.log('[Self] thought:', state.awareness?.currentThought || '-');
-      } else if (trimmed.startsWith('videoresearch ')) {
-        const topic = trimmed.slice(14).trim();
-        const vr = require('./modules/videoResearch');
-        const vcfg = config.survivalAI?.knowledge || {};
-        vr.researchTopic(topic, { ...vcfg, enableVideoDownload: vcfg.enableVideoDownload !== false, maxVisionFrames: vcfg.maxVisionFrames || 8 })
-          .then(v => { const st = require('./modules/state').loadState(); st.videoResearch.last = v; st.videoResearch.history.push({ topic, at: Date.now(), sourceCount: v.sources?.length || 0, confidence: v.plan?.confidence || 0 }); require('./modules/state').saveState(st); console.log('[VideoResearch]', JSON.stringify({ topic, sources: v.sources?.length || 0, confidence: v.plan?.confidence || 0, frames: v.sources?.reduce((n,x)=>n+(x.evidence?.storyboardFrames||0),0) }, null, 2)); })
-          .catch(e => console.log('[VideoResearch] error:', e.message));
-      } else if (trimmed === 'fullacquisition') {
-        const wa = require('./modules/worldAcquisition');
-        const graph = wa.buildFullGraph(bot, mcData, { defaultCount: 1, maxDepth: config.survivalAI?.acquisition?.maxDepth || 8 });
-        const st = require('./modules/state').loadState(); st.acquisitionGraph = graph; require('./modules/state').saveState(st);
-        console.log('[FullAcquisition]', JSON.stringify({ itemCount: graph.itemCount, learnedTopicCount: graph.learnedTopicCount }, null, 2));
-      } else if (trimmed.startsWith('farmauto ')) {
-        const topic = trimmed.slice(9).trim();
-        const builder = require('./modules/autonomousBuilder');
-        builder.learnPlanBuild(bot, mcData, topic, { ...(config.survivalAI?.learningBuilds || {}), researchBeforeBuild: true, knowledge: config.survivalAI?.knowledge || {}, base: config.survivalAI?.base || {}, farming: config.survivalAI?.farming || {}, storage: config.survivalAI?.storage || {} })
-          .then(v => console.log('[FarmAuto]', JSON.stringify(v, null, 2)))
-          .catch(e => console.log('[FarmAuto] error:', e.message));
       } else if (trimmed === 'knowledge') {
-        const k = require('./modules/knowledgeEngine').getKnowledge();
-        console.log('[Knowledge] topics:', Object.keys(k.topics || {}).length, 'sources:', Object.keys(k.sources || {}).length);
-        console.log((Object.entries(k.topics || {}).slice(-10)).map(([name, v]) => `${name}=${Math.round((v.confidence || 0)*100)}%`).join(' | '));
+        console.log(JSON.stringify(knowledge.getReport(20), null, 2));
+      } else if (trimmed === 'abilities' || trimmed === 'about') {
+        const selfAwareness = require('./modules/selfAwareness');
+        console.log(selfAwareness.report());
+        if (bot && botState.connected) {
+          const self = selfAwareness.describeSelf(bot, config.survivalAI || {});
+          console.log('[Awareness] ' + self.status.join(' | '));
+        }
+      } else if (trimmed === 'chests') {
+        console.log(JSON.stringify(require('./modules/chestSystem').report(), null, 2));
+      } else if (trimmed.startsWith('craft ')) {
+        const target = trimmed.slice(6).trim();
+        if (!target || !bot || !botState.connected) return;
+        (async () => {
+          try {
+            const mcData = require('minecraft-data')(bot.version);
+            const ok = await require('./modules/craftKnowledge').autoCraft(bot, mcData, target, 1);
+            console.log(`[CraftKnowledge] "${target}" ${ok ? 'üretildi' : 'üretilemedi'}.`);
+          } catch (e) {
+            console.log(`[CraftKnowledge] Hata: ${e.message}`);
+          }
+        })();
       } else if (trimmed.startsWith('learn ')) {
-        const topic = trimmed.slice(6).trim();
-        const kcfg = config.survivalAI?.knowledge || {};
-        require('./modules/knowledgeEngine').learnTopic(topic, kcfg)
-          .then(v => console.log('[Knowledge] Learned:', v.title || topic, v.tags || []))
-          .catch(e => console.log('[Knowledge] Learn error:', e.message));
-      } else if (trimmed.startsWith('item ')) {
-        const itemName = trimmed.slice(5).trim();
-        const plan = require('./modules/acquisitionEngine').planItem(bot, mcData, itemName, 1, (config.survivalAI?.acquisition?.maxDepth || 8));
-        console.log('[Acquisition]', JSON.stringify(plan, null, 2));
-      } else if (trimmed === 'acquisition') {
-        const ae = require('./modules/acquisitionEngine');
-        const graph = ae.buildAcquisitionGraph(bot, mcData, { defaultCount: 1, maxDepth: config.survivalAI?.acquisition?.maxDepth || 8 });
-        console.log('[AcquisitionGraph]', JSON.stringify({ itemCount: graph.itemCount, generatedAt: graph.generatedAt }, null, 2));
-        try { require('./modules/knowledgeEngine').saveKnowledge(Object.assign(require('./modules/knowledgeEngine').loadKnowledge(), { acquisition: graph })); } catch (_) {}
-      } else if (trimmed.startsWith('farm ')) {
-        const topic = trimmed.slice(5).trim();
-        const builder = require('./modules/autonomousBuilder');
-        builder.learnPlanBuild(bot, mcData, topic, { ...(config.survivalAI?.learningBuilds || {}), tag: /iron/i.test(topic) ? 'iron-farm' : /mob|xp/i.test(topic) ? 'mob-farm' : 'food-farm', knowledge: config.survivalAI?.knowledge || {}, base: config.survivalAI?.base || {}, farming: config.survivalAI?.farming || {}, storage: config.survivalAI?.storage || {} })
-          .then(v => console.log('[Farm]', JSON.stringify(v, null, 2)))
-          .catch(e => console.log('[Farm] error:', e.message));
-      } else if (trimmed === 'learnbuild') {
-        const builder = require('./modules/autonomousBuilder');
-        builder.autonomousBuildCycle(bot, mcData, { ...(config.survivalAI?.learningBuilds || {}), knowledge: config.survivalAI?.knowledge || {}, base: config.survivalAI?.base || {}, farming: config.survivalAI?.farming || {}, storage: config.survivalAI?.storage || {} })
-          .then(v => console.log('[Builder]', JSON.stringify(v, null, 2)))
-          .catch(e => console.log('[Builder] error:', e.message));
-      } else if (trimmed === 'buildstatus') {
-        const st = require('./modules/state').loadState();
-        console.log('[Builder] last:', JSON.stringify(st.learnedBuilds?.last || null, null, 2));
-      } else if (trimmed === 'baseplan') {
-        const bd = require('./modules/baseDesign');
-        const state = require('./modules/state').loadState();
-        console.log('[Base]', state.baseDesign || {});
-        console.log('[Base rooms]', bd.chooseRoomLayout(config.survivalAI?.base || {}));
-      } else if (trimmed === 'combatstatus') {
-        const st = require('./modules/state').loadState();
-        console.log('[Combat]', JSON.stringify(st.combat || {}, null, 2));
-      } else if (trimmed === 'miningstatus') {
-        const st = require('./modules/state').loadState();
-        console.log('[Mining]', JSON.stringify(st.mining || {}, null, 2));
-      } else if (trimmed === 'forcesurvival') {
-        require('./modules/survivalAI').runOneStep(bot, mcData, config.survivalAI || {})
-          .then(() => console.log('[SurvivalAI] Manual step complete.'))
-          .catch(e => console.log('[SurvivalAI] Manual step error:', e.message));
+        const target = trimmed.slice(6).trim();
+        if (!target) return;
+        (async () => {
+          try {
+            const result = /^https?:\/\//i.test(target)
+              ? await knowledge.learnFromUrl(target)
+              : await knowledge.learnTopic(target, 3);
+            console.log('[Knowledge] Learning result:', JSON.stringify(result, null, 2));
+          } catch (e) {
+            console.log(`[Knowledge] Learning failed: ${e.message}`);
+          }
+        })();
       } else {
         bot.chat(trimmed);
       }
     });
   }
 
-  console.log('[Modules] Commands: brain, self, learned, knowledge, learn <topic>, videoresearch <topic>, item <item_name>, acquisition, fullacquisition, farm <topic>, farmauto <topic>, learnbuild, buildstatus, baseplan.');
+  console.log('[Modules] All modules initialized.');
+}
+
+function startCircleWalk(bot, defaultMove) {
+  const radius = config.movement['circle-walk'].radius;
+  let angle = 0;
+  let lastPathTime = 0;
+
+  addInterval(() => {
+    if (!bot || !botState.connected) return;
+    const now = Date.now();
+    if (now - lastPathTime < 2000) return;
+    lastPathTime = now;
+    try {
+      const x = bot.entity.position.x + Math.cos(angle) * radius;
+      const z = bot.entity.position.z + Math.sin(angle) * radius;
+      bot.pathfinder.setMovements(defaultMove);
+      bot.pathfinder.setGoal(new GoalBlock(Math.floor(x), Math.floor(bot.entity.position.y), Math.floor(z)));
+
+      angle = (angle + Math.PI / 4) % (Math.PI * 2);
+      botState.lastActivity = Date.now();
+    } catch (e) {
+      console.log('[CircleWalk] Error:', e.message);
+    }
+  }, config.movement['circle-walk'].speed);
+}
+
+function startRandomJump(bot) {
+  addInterval(() => {
+    if (!bot || !botState.connected || typeof bot.setControlState !== 'function') return;
+    try {
+      bot.setControlState('jump', true);
+      setTimeout(() => {
+        if (bot && typeof bot.setControlState === 'function') bot.setControlState('jump', false);
+      }, 300);
+      botState.lastActivity = Date.now();
+    } catch (e) {
+      console.log('[RandomJump] Error:', e.message);
+    }
+  }, config.movement['random-jump'].interval);
+}
+
+function startLookAround(bot) {
+  addInterval(() => {
+    if (!bot || !botState.connected) return;
+    try {
+      const yaw = (Math.random() * Math.PI * 2) - Math.PI;
+      const pitch = (Math.random() * Math.PI / 2) - Math.PI / 4;
+      bot.look(yaw, pitch, false);
+      botState.lastActivity = Date.now();
+    } catch (e) {
+      console.log('[LookAround] Error:', e.message);
+    }
+  }, config.movement['look-around'].interval);
+}
+
+function avoidMobs(bot) {
+  const safeDistance = 5;
+  addInterval(() => {
+    if (!bot || !botState.connected || typeof bot.setControlState !== 'function') return;
+    try {
+      const entities = Object.values(bot.entities).filter(e =>
+        e.type === 'mob' || (e.type === 'player' && e.username !== bot.username)
+      );
+      for (const e of entities) {
+        if (!e.position) continue;
+        if (bot.entity.position.distanceTo(e.position) < safeDistance) {
+          bot.setControlState('back', true);
+          setTimeout(() => {
+            if (bot && typeof bot.setControlState === 'function') bot.setControlState('back', false);
+          }, 500);
+          break;
+        }
+      }
+    } catch (e) {
+      console.log('[AvoidMobs] Error:', e.message);
+    }
+  }, 2000);
+}
+
+function combatModule(bot, mcData) {
+  let lastAttackTime = 0;
+  let lockedTarget = null;
+  let lockedTargetExpiry = 0;
+
+  bot.on('physicsTick', () => {
+    if (!bot || !botState.connected || !config.combat['attack-mobs']) return;
+    const now = Date.now();
+    if (now - lastAttackTime < 620) return;
+
+    try {
+
+      if (lockedTarget && now < lockedTargetExpiry && bot.entities[lockedTarget.id] && lockedTarget.position) {
+        if (bot.entity.position.distanceTo(lockedTarget.position) < 4) {
+          bot.attack(lockedTarget);
+          lastAttackTime = now;
+          return;
+        } else {
+          lockedTarget = null;
+        }
+      }
+
+      const mobs = Object.values(bot.entities).filter(e =>
+        e.type === 'mob' && e.position && bot.entity.position.distanceTo(e.position) < 4
+      );
+      if (mobs.length > 0) {
+        lockedTarget = mobs[0];
+        lockedTargetExpiry = now + 3000;
+        bot.attack(lockedTarget);
+        lastAttackTime = now;
+      }
+    } catch (e) {
+      console.log('[Combat] Error:', e.message);
+    }
+  });
+
+  bot.on('health', () => {
+    if (!config.combat['auto-eat']) return;
+    try {
+      if (bot.food < 14) {
+        const food = bot.inventory.items().find(i => {
+          const foodData = mcData.foods ? Object.values(mcData.foods).find(f => f.id === i.type) : null;
+          return foodData && foodData.foodPoints > 0;
+        });
+        if (food) {
+
+          bot.equip(food, 'hand')
+            .then(() => {
+              if (bot && botState.connected) return bot.consume();
+            })
+            .catch(e => console.log('[AutoEat] Error:', e.message));
+        }
+      }
+    } catch (e) {
+      console.log('[AutoEat] Error:', e.message);
+    }
+  });
 }
 
 function bedModule(bot, mcData) {
@@ -946,11 +1035,12 @@ process.on('SIGTERM', () => console.log('[System] SIGTERM received - staying ali
 process.on('SIGINT',  () => console.log('[System] SIGINT received - staying alive.'));
 
 console.log('='.repeat(50));
-console.log('  Minecraft AFK Bot - Fixed Edition');
+console.log('  Minecraft Bot - Autonomous Survival Edition');
 console.log('='.repeat(50));
 console.log(`Server:         ${config.server.ip}:${config.server.port}`);
 console.log(`Bot Username:   ${process.env.BOT_USERNAME || config['bot-account'].username}`);
 console.log(`Auto-Reconnect: ${config.utils['auto-reconnect'] ? 'Enabled' : 'Disabled'}`);
+console.log(`Autonomous AI:  ${config.modules.survivalAI ? 'Enabled - bot acts on its own goals' : 'Disabled - fallback AFK mode'}`);
 console.log('='.repeat(50));
 
 createBot();

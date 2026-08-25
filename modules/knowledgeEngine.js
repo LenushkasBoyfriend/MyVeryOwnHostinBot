@@ -1,274 +1,426 @@
 'use strict';
 
 /*
- * Knowledge Brain: external-source learning for Minecraft techniques.
- * - Searches YouTube using the official Data API when a key is configured.
- * - Falls back to lightweight YouTube result-page parsing when possible.
- * - Extracts available caption tracks from the video page.
- * - Optionally asks an external AI Responses API model to turn a transcript/article
- *   into structured Minecraft knowledge.
- * - Stores knowledge locally so the bot keeps what it learned.
+ * Knowledge Brain
  *
- * This is not unlimited access: YouTube/API providers can impose quotas,
- * authentication, rate limits and terms. The bot simply has no small built-in
- * topic limit and learns again whenever its cooldown allows it.
+ * Learns Minecraft techniques/farms from public web pages and YouTube captions
+ * when they are available. It stores structured knowledge, source confidence,
+ * and practical outcomes so Survival Brain can prefer ideas that worked in the
+ * bot's own world over unverified internet claims.
+ *
+ * No external npm dependency is required. Network access is optional; the bot
+ * remains fully functional when learning is unavailable.
  */
 
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
 const http = require('http');
+const https = require('https');
 const { URL } = require('url');
 const { loadState, saveState } = require('./state');
-const { log, sleep } = require('./utils');
 
-const KNOWLEDGE_FILE = path.join(__dirname, '..', 'knowledge_base.json');
+const MAX_SOURCE_CHARS = 180000;
+const MAX_TRANSCRIPT_CHARS = 120000;
+const REQUEST_TIMEOUT_MS = 15000;
+const MEMORY_KEY = 'knowledge';
 
-function requestText(url, headers = {}, timeoutMs = 20000) {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const lib = parsed.protocol === 'http:' ? http : https;
-    const req = lib.get(url, { headers: { 'User-Agent': 'MinecraftSurvivalBrain/1.0', ...headers } }, res => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        res.resume();
-        return resolve(requestText(new URL(res.headers.location, url).toString(), headers, timeoutMs));
-      }
-      let body = '';
-      res.setEncoding('utf8');
-      res.on('data', chunk => {
-        body += chunk;
-        if (body.length > 8 * 1024 * 1024) req.destroy(new Error('response-too-large'));
-      });
-      res.on('end', () => {
-        if (res.statusCode >= 400) return reject(new Error(`HTTP ${res.statusCode}`));
-        resolve(body);
-      });
-    });
-    req.setTimeout(timeoutMs, () => req.destroy(new Error('request-timeout')));
-    req.on('error', reject);
-  });
+function ensure(state) {
+  state[MEMORY_KEY] = state[MEMORY_KEY] || {
+    version: 1,
+    sources: {},
+    topics: {},
+    techniques: {},
+    claims: {},
+    experiments: [],
+    queue: [],
+    lastLearnAt: 0,
+    lastSearchAt: 0
+  };
+  const k = state[MEMORY_KEY];
+  k.sources = k.sources || {};
+  k.topics = k.topics || {};
+  k.techniques = k.techniques || {};
+  k.claims = k.claims || {};
+  k.experiments = k.experiments || [];
+  k.queue = k.queue || [];
+  return k;
 }
 
-function requestJson(url, headers = {}, timeoutMs = 20000) {
-  return requestText(url, headers, timeoutMs).then(text => JSON.parse(text));
-}
-
-function loadKnowledge() {
-  try {
-    if (fs.existsSync(KNOWLEDGE_FILE)) return JSON.parse(fs.readFileSync(KNOWLEDGE_FILE, 'utf8'));
-  } catch (e) {
-    log('Knowledge', `Bilgi tabanı okunamadı: ${e.message}`);
-  }
-  return { version: 1, topics: {}, sources: {}, items: {}, techniques: {}, lastResearchAt: 0 };
-}
-
-function saveKnowledge(db) {
-  try {
-    fs.writeFileSync(KNOWLEDGE_FILE, JSON.stringify(db, null, 2));
-  } catch (e) {
-    log('Knowledge', `Bilgi tabanı yazılamadı: ${e.message}`);
-  }
-}
-
-function cleanText(text) {
+function normalize(text) {
   return String(text || '')
-    .replace(/\\u003c/g, '<').replace(/\\u003e/g, '>').replace(/\\u0026/g, '&')
-    .replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/<br\s*\/?>(\r?\n)?/gi, '\n')
     .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function extractYoutubeId(input) {
+function clampText(text, max) {
+  const clean = normalize(text);
+  return clean.length > max ? clean.slice(0, max) : clean;
+}
+
+function request(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    let parsed;
+    try { parsed = new URL(url); } catch (e) { return reject(new Error(`Invalid URL: ${url}`)); }
+    if (!['http:', 'https:'].includes(parsed.protocol)) return reject(new Error('Only http/https URLs are supported.'));
+    if (redirects > 4) return reject(new Error('Too many redirects.'));
+
+    const client = parsed.protocol === 'https:' ? https : http;
+    const req = client.get(parsed, {
+      timeout: REQUEST_TIMEOUT_MS,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Minecraft-Survival-Brain/5.0)',
+        'Accept-Language': 'en-US,en;q=0.8,tr;q=0.7'
+      }
+    }, res => {
+      const location = res.headers.location;
+      if (location && [301, 302, 303, 307, 308].includes(res.statusCode || 0)) {
+        res.resume();
+        return request(new URL(location, parsed).href, redirects + 1).then(resolve).catch(reject);
+      }
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => {
+        data += chunk;
+        if (data.length > MAX_SOURCE_CHARS + 20000) req.destroy();
+      });
+      res.on('end', () => {
+        if ((res.statusCode || 500) >= 400) return reject(new Error(`HTTP ${res.statusCode}`));
+        resolve({ body: data.slice(0, MAX_SOURCE_CHARS), contentType: res.headers['content-type'] || '' });
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('Request timed out.')));
+    req.on('error', reject);
+  });
+}
+
+function shaish(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return (h >>> 0).toString(16);
+}
+
+function youtubeId(input) {
   try {
     const u = new URL(input);
-    if (u.hostname.includes('youtu.be')) return u.pathname.slice(1).split('/')[0];
-    return u.searchParams.get('v') || u.pathname.split('/').filter(Boolean).pop();
-  } catch (_) {
-    const m = String(input).match(/[A-Za-z0-9_-]{11}/);
-    return m ? m[0] : null;
-  }
-}
-
-async function searchYouTube(query, cfg = {}) {
-  const q = String(query || '').trim();
-  if (!q) return [];
-  if (cfg.apiKey) {
-    const params = new URLSearchParams({
-      part: 'snippet', type: 'video', maxResults: String(Math.min(50, cfg.maxResults || 10)),
-      q, safeSearch: 'none', videoCaption: 'any', key: cfg.apiKey
-    });
-    const data = await requestJson(`https://www.googleapis.com/youtube/v3/search?${params}`);
-    return (data.items || []).map(item => ({
-      id: item.id?.videoId,
-      title: cleanText(item.snippet?.title),
-      description: cleanText(item.snippet?.description),
-      channel: cleanText(item.snippet?.channelTitle),
-      publishedAt: item.snippet?.publishedAt,
-      url: item.id?.videoId ? `https://www.youtube.com/watch?v=${item.id.videoId}` : null,
-      source: 'youtube-api'
-    })).filter(v => v.id);
-  }
-
-  // Fallback: parse YouTube's public result HTML. This is intentionally best-effort
-  // because YouTube can change its page structure or block automated requests.
-  const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
-  const html = await requestText(url);
-  const out = [];
-  const re = /"videoRenderer":\{"videoId":"([^"]+)"[\s\S]*?"title":\{"runs":\[\{"text":"((?:\\.|[^"\\])*)"/g;
-  let m;
-  const seen = new Set();
-  while ((m = re.exec(html)) && out.length < (cfg.maxResults || 10)) {
-    if (seen.has(m[1])) continue;
-    seen.add(m[1]);
-    out.push({ id: m[1], title: cleanText(m[2]), url: `https://www.youtube.com/watch?v=${m[1]}`, source: 'youtube-page' });
-  }
-  return out;
-}
-
-async function getYoutubeCaptions(videoId) {
-  const html = await requestText(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`);
-  const marker = html.match(/"captionTracks":(\[[\s\S]*?\]),"audioTracks"/);
-  if (!marker) return { text: '', language: null, available: false };
-  let tracks;
-  try { tracks = JSON.parse(marker[1]); } catch (_) { return { text: '', language: null, available: false }; }
-  if (!Array.isArray(tracks) || !tracks.length) return { text: '', language: null, available: false };
-  const preferred = tracks.find(t => /^en/i.test(t.languageCode || '')) || tracks[0];
-  if (!preferred?.baseUrl) return { text: '', language: null, available: false };
-  const xml = await requestText(preferred.baseUrl);
-  const chunks = [];
-  const re = /<text[^>]*>([\s\S]*?)<\/text>/g;
-  let m;
-  while ((m = re.exec(xml))) chunks.push(cleanText(m[1]));
-  return { text: chunks.join(' '), language: preferred.languageCode || null, available: chunks.length > 0 };
-}
-
-function extractMinecraftFacts(text, title = '') {
-  const body = `${title} ${text}`.toLowerCase();
-  const tags = [];
-  const tagRules = [
-    ['iron-farm', /iron\s+farm|villager.*iron|iron.*golem/],
-    ['mob-farm', /mob\s+farm|hostile\s+mob|xp\s+farm/],
-    ['food-farm', /wheat|carrot|potato|food\s+farm|crop\s+farm/],
-    ['tree-farm', /tree\s+farm|wood\s+farm/],
-    ['redstone', /redstone|hopper|observer|piston|sorter/],
-    ['storage', /storage|sorting|item\s+sorter|chest\s+system/],
-    ['villager', /villager|trading\s+hall/],
-    ['mining', /branch\s+mine|strip\s+mine|ore|diamond|ancient\s+debris/],
-    ['building', /base\s+design|house\s+build|underground\s+base|survival\s+base|build\s+ideas/],
-    ['enchanting', /enchant|anvil|mending|unbreaking|efficiency/]
-  ];
-  for (const [tag, rule] of tagRules) if (rule.test(body)) tags.push(tag);
-  const materials = Array.from(new Set((body.match(/\b(?:oak|spruce|birch|jungle|acacia|dark oak|stone|stone bricks|deepslate|polished deepslate|cobblestone|glass|lantern|iron|hopper|chest|barrel|redstone|observer|piston|rail|water|lava|villager|wheat|carrot|potato|bone meal)\b/g) || [])));
-  return { tags, materials };
-}
-
-async function learnFromVideo(urlOrId, cfg = {}) {
-  const id = extractYoutubeId(urlOrId);
-  if (!id) throw new Error('YouTube video ID bulunamadı.');
-  const meta = { id, url: `https://www.youtube.com/watch?v=${id}`, title: `YouTube ${id}` };
-  const caption = await getYoutubeCaptions(id);
-  const facts = extractMinecraftFacts(caption.text, meta.title);
-  const summary = caption.text ? caption.text.slice(0, 2500) : 'Kaynak metni bulunamadı; yalnızca başlık/yerel kurallar kullanılabilir.';
-  const analysis = {
-    summary, prerequisites: [], steps: [],
-    materials: facts.materials || [], versionHints: [], risks: caption.available ? [] : ['Transcript unavailable; no model-based interpretation is used.'],
-    metrics: [], confidence: caption.available ? 0.55 : 0.15,
-    dimensions: { width: 0, length: 0, height: 0 }, blockPlacements: [], layoutRules: [],
-    checkpoints: [], verificationSteps: [], failureModes: [], tags: facts.tags || []
-  };
-  const merged = {
-    id, url: meta.url, title: meta.title, sourceType: 'youtube', learnedAt: Date.now(),
-    transcriptLanguage: caption.language, transcriptAvailable: caption.available, visualAvailable: false,
-    visual: null, tags: Array.from(new Set(facts.tags || [])), materials: Array.from(new Set(facts.materials || [])), analysis
-  };
-  const db = loadKnowledge();
-  db.sources[id] = merged;
-  for (const tag of merged.tags) {
-    db.topics[tag] = db.topics[tag] || { learned: 0, sources: [], confidence: 0 };
-    if (!db.topics[tag].sources.includes(id)) db.topics[tag].sources.push(id);
-    db.topics[tag].learned += 1;
-    db.topics[tag].confidence = Math.max(db.topics[tag].confidence, Number(merged.analysis.confidence || 0));
-  }
-  saveKnowledge(db);
-  return merged;
-}
-
-async function learnTopic(topic, cfg = {}) {
-  const videos = await searchYouTube(topic, cfg);
-  if (!videos.length) throw new Error(`Kaynak bulunamadı: ${topic}`);
-  // Score source choice by title relevance, captions availability (when API results have it later),
-  // and recency signal. Then try a few candidates instead of blindly taking the first result.
-  const candidates = videos.map(v => ({ ...v, score: scoreVideo(v, topic) })).sort((a, b) => b.score - a.score);
-  let lastErr = null;
-  const learnedSources = [];
-  for (const candidate of candidates.slice(0, Math.min(4, candidates.length))) {
-    try {
-      const learned = await learnFromVideo(candidate.url, cfg);
-      learned.title = candidate.title || learned.title;
-      learned.channel = candidate.channel;
-      learned.selectionScore = candidate.score;
-      const db = loadKnowledge();
-      db.sources[candidate.id] = { ...db.sources[candidate.id], ...learned };
-      learnedSources.push(db.sources[candidate.id]);
-      saveKnowledge(db);
-    } catch (e) { lastErr = e; }
-    await sleep(150);
-  }
-  if (!learnedSources.length) throw lastErr || new Error('Video öğrenilemedi.');
-  // Fuse the best few sources: independent agreement increases confidence; conflicting claims become risks.
-  const best = learnedSources.slice().sort((a, b) => Number(b.analysis?.confidence || 0) - Number(a.analysis?.confidence || 0))[0];
-  const allTags = Array.from(new Set(learnedSources.flatMap(x => x.tags || [])));
-  const allMaterials = Array.from(new Set(learnedSources.flatMap(x => x.materials || [])));
-  const allSteps = Array.from(new Set(learnedSources.flatMap(x => (x.analysis?.steps || []).map(st => typeof st === 'string' ? st : JSON.stringify(st))))).slice(0, 120);
-  const averageConfidence = learnedSources.reduce((n, x) => n + Number(x.analysis?.confidence || 0), 0) / learnedSources.length;
-  const fused = { ...best, tags: allTags, materials: allMaterials, corroboratedSources: learnedSources.map(x => x.id), analysis: { ...best.analysis, steps: allSteps, confidence: Math.min(1, averageConfidence + Math.min(0.15, (learnedSources.length - 1) * 0.05)), sourceCount: learnedSources.length } };
-  return fused;
-}
-
-function scoreVideo(video, topic) {
-  const text = `${video.title || ''} ${video.description || ''}`.toLowerCase();
-  const q = String(topic).toLowerCase().split(/\s+/).filter(Boolean);
-  let score = 0;
-  for (const w of q) if (text.includes(w)) score += 2;
-  if (/tutorial|guide|farm|design|automatic|survival|1\.2/.test(text)) score += 2;
-  if (/shorts?/.test(text)) score -= 1;
-  if (video.publishedAt) score += Math.max(0, 2 - ((Date.now() - Date.parse(video.publishedAt)) / (365 * 24 * 3600 * 1000)));
-  return score;
-}
-
-function getKnowledge(topic = '') {
-  const db = loadKnowledge();
-  if (!topic) return { topics: db.topics, sources: db.sources, items: db.items, techniques: db.techniques };
-  const key = String(topic).toLowerCase();
-  return {
-    topic: key,
-    topicState: db.topics[key] || null,
-    sources: Object.values(db.sources).filter(s => (s.tags || []).some(t => t.includes(key) || key.includes(t))).slice(-20)
-  };
-}
-
-function recordExperiment(topic, result = {}) {
-  const db = loadKnowledge();
-  const key = String(topic).toLowerCase();
-  db.topics[key] = db.topics[key] || { learned: 0, sources: [], confidence: 0 };
-  const prev = Number(db.topics[key].confidence || 0);
-  const outcome = result.success ? 1 : 0;
-  db.topics[key].confidence = Math.max(0, Math.min(1, prev * 0.8 + outcome * 0.2));
-  db.topics[key].lastExperiment = { at: Date.now(), ...result };
-  saveKnowledge(db);
-}
-
-async function autonomousResearch(topic, cfg = {}) {
-  // V14.2 is fully self-contained: no external AI or external model is used.
-  // Knowledge can only come from the local knowledge_base.json and in-game experiments.
-  const local = getKnowledge(topic);
-  if (local.sources?.length) return local.sources[local.sources.length - 1];
-  log('Knowledge', `Harici AI araştırması devre dışı: ${topic}`);
+    if (u.hostname.includes('youtu.be')) return u.pathname.replace(/^\//, '').split('/')[0] || null;
+    if (u.hostname.includes('youtube.com')) {
+      if (u.searchParams.get('v')) return u.searchParams.get('v');
+      const parts = u.pathname.split('/').filter(Boolean);
+      if (parts[0] === 'shorts' || parts[0] === 'embed') return parts[1] || null;
+    }
+  } catch (_) {}
   return null;
 }
 
+function extractJsonObjectAfter(source, marker) {
+  const idx = source.indexOf(marker);
+  if (idx < 0) return null;
+  const start = source.indexOf('{', idx);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < source.length; i++) {
+    const c = source[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+function decodeHtmlEntities(value) {
+  return String(value || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function parseYoutubeCaptions(html) {
+  const jsonText = extractJsonObjectAfter(html, 'ytInitialPlayerResponse');
+  if (!jsonText) return null;
+  let player;
+  try { player = JSON.parse(jsonText); } catch (_) { return null; }
+  const tracks = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+  if (!tracks.length) return null;
+  const preferred = tracks.find(t => /^(en|tr)(-|$)/i.test(t.languageCode || '')) || tracks[0];
+  if (!preferred?.baseUrl) return null;
+  return decodeHtmlEntities(preferred.baseUrl);
+}
+
+function parseTranscriptXml(xml) {
+  const chunks = [];
+  const re = /<text[^>]*>([\s\S]*?)<\/text>/g;
+  let m;
+  while ((m = re.exec(xml))) {
+    const text = decodeHtmlEntities(m[1]).replace(/\s+/g, ' ').trim();
+    if (text) chunks.push(text);
+    if (chunks.join(' ').length > MAX_TRANSCRIPT_CHARS) break;
+  }
+  return clampText(chunks.join(' '), MAX_TRANSCRIPT_CHARS);
+}
+
+async function fetchYouTube(url) {
+  const id = youtubeId(url);
+  if (!id) throw new Error('Not a supported YouTube URL.');
+  const page = await request(`https://www.youtube.com/watch?v=${encodeURIComponent(id)}`);
+  const titleMatch = page.body.match(/<title>([\s\S]*?)<\/title>/i);
+  const title = normalize(titleMatch ? titleMatch[1].replace(/ - YouTube\s*$/i, '') : `YouTube ${id}`);
+  let transcript = null;
+  const captionUrl = parseYoutubeCaptions(page.body);
+  if (captionUrl) {
+    try {
+      const caption = await request(captionUrl);
+      transcript = parseTranscriptXml(caption.body);
+    } catch (_) {}
+  }
+  return {
+    type: 'youtube', id, title,
+    url,
+    content: transcript || normalize(page.body).slice(0, MAX_TRANSCRIPT_CHARS),
+    transcriptAvailable: !!transcript
+  };
+}
+
+function extractTitle(html, fallback) {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return normalize(match ? match[1] : fallback).slice(0, 300) || fallback;
+}
+
+function extractTextFromHtml(html) {
+  return clampText(html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' '), MAX_SOURCE_CHARS);
+}
+
+function sourceType(url) {
+  const id = youtubeId(url);
+  if (id) return 'youtube';
+  return 'web';
+}
+
+function scoreConfidence(item, content) {
+  let score = item.type === 'youtube' && item.transcriptAvailable ? 0.78 : (item.type === 'youtube' ? 0.5 : 0.62);
+  const text = String(content || '').toLowerCase();
+  if (/minecraft|farm|iron|redstone|villager|mob|hopper|piston|enchant|diamond/.test(text)) score += 0.08;
+  if (/1\.21|1\.20|1\.19/.test(text)) score += 0.04;
+  return Math.min(0.95, score);
+}
+
+function inferTechniques(text, source) {
+  const lower = String(text || '').toLowerCase();
+  const rules = [
+    ['iron-farm', /iron farm|demir farm|iron golem.*farm/],
+    ['sugarcane-farm', /sugar cane|şeker kamışı|sugarcane.*farm/],
+    ['bamboo-farm', /bamboo farm|bambu farm/],
+    ['mob-farm', /mob farm|hostile mob farm|mob grinder/],
+    ['villager-trading', /villager trading|köylü ticaret|trading hall/],
+    ['branch-mining', /branch mining|strip mining|dal maden|şerit maden/],
+    ['redstone-storage', /item sorter|item storage|sorting system|eşya ayır/],
+    ['enchantment', /enchanting|enchantment|büyü masası|büyü/],
+    ['nether-prep', /nether preparation|nether hazırl|nether portal/],
+    ['food-farm', /wheat farm|carrot farm|potato farm|food farm|buğday farm|havuç farm/]
+  ];
+  const found = [];
+  for (const [id, rx] of rules) if (rx.test(lower)) found.push({ id, title: id.replace(/-/g, ' '), sourceId: source.id });
+  if (!found.length && lower.length > 1000) found.push({ id: `tech-${shaish(source.id + text.slice(0, 500))}`, title: source.title, sourceId: source.id });
+  return found;
+}
+
+function learnRecord(record) {
+  const state = loadState();
+  const k = ensure(state);
+  const sourceId = `${record.type}:${record.id || shaish(record.url)}`;
+  const confidence = scoreConfidence({ type: record.type, transcriptAvailable: record.transcriptAvailable }, record.content);
+  const source = {
+    id: sourceId,
+    type: record.type,
+    url: record.url,
+    title: record.title,
+    learnedAt: Date.now(),
+    confidence,
+    transcriptAvailable: !!record.transcriptAvailable,
+    excerpt: clampText(record.content, 5000)
+  };
+  k.sources[sourceId] = source;
+
+  const techniques = inferTechniques(record.content, source);
+  for (const t of techniques) {
+    const existing = k.techniques[t.id] || { id: t.id, title: t.title, sourceIds: [], confidence: 0, attempts: 0, successes: 0, failures: 0, notes: [] };
+    if (!existing.sourceIds.includes(sourceId)) existing.sourceIds.push(sourceId);
+    existing.confidence = Math.min(0.99, Math.max(existing.confidence || 0, confidence));
+    existing.updatedAt = Date.now();
+    existing.notes = existing.notes || [];
+    if (existing.notes.length < 8) existing.notes.push(clampText(record.content, 600));
+    k.techniques[t.id] = existing;
+    k.claims[`${t.id}:${sourceId}`] = { techniqueId: t.id, sourceId, confidence, createdAt: Date.now() };
+  }
+
+  const topicKey = record.topic || record.title || sourceId;
+  k.topics[topicKey] = {
+    topic: topicKey,
+    lastLearnedAt: Date.now(),
+    sources: Array.from(new Set([...(k.topics[topicKey]?.sources || []), sourceId])).slice(-20),
+    techniqueIds: techniques.map(t => t.id),
+    confidence: confidence
+  };
+  k.lastLearnAt = Date.now();
+  saveState(state);
+  return { source, techniques };
+}
+
+async function learnFromUrl(url, topic = null) {
+  const type = sourceType(url);
+  let record;
+  if (type === 'youtube') record = await fetchYouTube(url);
+  else {
+    const page = await request(url);
+    record = { type: 'web', id: shaish(url), title: extractTitle(page.body, url), url, content: extractTextFromHtml(page.body), transcriptAvailable: false };
+  }
+  record.topic = topic || record.title;
+  return learnRecord(record);
+}
+
+async function searchWeb(query, limit = 5) {
+  const q = encodeURIComponent(query);
+  const url = `https://html.duckduckgo.com/html/?q=${q}`;
+  const page = await request(url);
+  const results = [];
+  const re = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = re.exec(page.body)) && results.length < limit) {
+    let href = m[1];
+    try {
+      const u = new URL(href, 'https://html.duckduckgo.com');
+      const uddg = u.searchParams.get('uddg');
+      if (uddg) href = uddg;
+    } catch (_) {}
+    results.push({ url: href, title: normalize(m[2]) });
+  }
+  return results;
+}
+
+async function learnTopic(topic, limit = 3) {
+  const state = loadState();
+  const k = ensure(state);
+  const searchKey = String(topic).toLowerCase().trim();
+  if (!searchKey) return { topic, learned: [], searched: [] };
+  const recently = k.topics[searchKey];
+  if (recently && Date.now() - (recently.lastLearnedAt || 0) < 24 * 60 * 60 * 1000) {
+    return { topic, learned: [], searched: [], skipped: 'recently-learned' };
+  }
+  const results = await searchWeb(`Minecraft ${topic} guide farm tutorial`, Math.max(limit, 3));
+  const learned = [];
+  for (const result of results.slice(0, limit)) {
+    try {
+      learned.push(await learnFromUrl(result.url, searchKey));
+    } catch (e) {
+      state.memory = state.memory || {};
+      state.memory.events = state.memory.events || [];
+      state.memory.events.push({ type: 'knowledge-fetch-failed', url: result.url, error: e.message, at: Date.now() });
+    }
+  }
+  saveState(state);
+  return { topic, learned, searched: results };
+}
+
+function recordExperiment(techniqueId, result = {}) {
+  const state = loadState();
+  const k = ensure(state);
+  const t = k.techniques[techniqueId] || { id: techniqueId, title: techniqueId, sourceIds: [], confidence: 0.3, attempts: 0, successes: 0, failures: 0 };
+  t.attempts = (t.attempts || 0) + 1;
+  if (result.success) t.successes = (t.successes || 0) + 1; else t.failures = (t.failures || 0) + 1;
+  const ownRate = t.attempts ? t.successes / t.attempts : 0;
+  t.practicalConfidence = Math.min(0.98, 0.25 + (ownRate * 0.65) + Math.min(0.08, t.attempts * 0.01));
+  t.lastExperiment = { at: Date.now(), result: { ...result } };
+  k.experiments.push({ techniqueId, at: Date.now(), result: { ...result } });
+  if (k.experiments.length > 150) k.experiments = k.experiments.slice(-100);
+  saveState(state);
+  return t;
+}
+
+function getKnowledgeForTechnique(techniqueId) {
+  const state = loadState();
+  const k = ensure(state);
+  return k.techniques[techniqueId] || null;
+}
+
+function listTechniques() {
+  const state = loadState();
+  const k = ensure(state);
+  return Object.values(k.techniques).sort((a, b) => ((b.practicalConfidence || b.confidence || 0) - (a.practicalConfidence || a.confidence || 0)));
+}
+
+function suggestTopics(snapshot = {}) {
+  const out = [];
+  if ((snapshot.coal || 0) < 12) out.push('automatic fuel farms');
+  if ((snapshot.foodItems || 0) < 8) out.push('automatic food farms');
+  if (!snapshot.hasPickaxe) out.push('early game mining techniques');
+  if ((snapshot.xpLevel || 0) >= 5) out.push('Minecraft enchanting strategy');
+  out.push('iron farm');
+  out.push('villager trading');
+  out.push('item sorting storage');
+  return Array.from(new Set(out)).slice(0, 4);
+}
+
+async function autoLearn(snapshot, cfg) {
+  if (!cfg?.knowledge?.enabled) return { skipped: 'disabled' };
+  const state = loadState();
+  const k = ensure(state);
+  const interval = Number(cfg.knowledge.interval || 30 * 60 * 1000);
+  if (Date.now() - (k.lastLearnAt || 0) < interval) return { skipped: 'cooldown' };
+  const topics = suggestTopics(snapshot).slice(0, Number(cfg.knowledge.topicsPerCycle || 1));
+  const results = [];
+  for (const topic of topics) {
+    try { results.push(await learnTopic(topic, Number(cfg.knowledge.sourcesPerTopic || 2))); }
+    catch (e) { results.push({ topic, error: e.message }); }
+  }
+  k.lastLearnAt = Date.now();
+  saveState(state);
+  return { topics, results };
+}
+
+function getReport(limit = 12) {
+  const state = loadState();
+  const k = ensure(state);
+  const techniques = listTechniques().slice(0, limit).map(t => ({
+    id: t.id,
+    title: t.title,
+    sources: (t.sourceIds || []).length,
+    externalConfidence: t.confidence,
+    practicalConfidence: t.practicalConfidence || null,
+    attempts: t.attempts || 0,
+    successes: t.successes || 0,
+    failures: t.failures || 0
+  }));
+  return { lastLearnAt: k.lastLearnAt, sources: Object.keys(k.sources).length, techniques };
+}
+
 module.exports = {
-  loadKnowledge, saveKnowledge, searchYouTube, getYoutubeCaptions, learnFromVideo, learnTopic,
-  getKnowledge, recordExperiment, autonomousResearch, extractMinecraftFacts, scoreVideo
+  learnFromUrl,
+  learnTopic,
+  recordExperiment,
+  getKnowledgeForTechnique,
+  listTechniques,
+  suggestTopics,
+  autoLearn,
+  getReport
 };

@@ -7,10 +7,17 @@
  * - Keeps a persistent memory of successes, failures, locations and players.
  */
 
+const { loadState, saveState } = require('./state');
 const { countItem } = require('./utils');
 const experience = require('./experienceEngine');
+const goalManager = require('./goalManager');
+const planner = require('./adaptivePlanner');
 const habits = require('./habitEngine');
-const { loadState, saveState } = require('./state');
+
+// Goals whose safety floor must never be suppressed by learned mistakes or
+// deliberate imperfection — the bot can be forgetful or a little inconsistent
+// about wood or mining, never about starving or dying.
+const CRITICAL_GOALS = new Set(['survive', 'food']);
 
 function snapshot(bot) {
   const items = bot.inventory.items();
@@ -31,7 +38,7 @@ function snapshot(bot) {
     itemCount: items.reduce((n, i) => n + i.count, 0),
     lowestDurability: durability.length ? Math.min(...durability) : null,
     coal: countItem(bot, 'coal') + countItem(bot, 'charcoal'),
-    foodItems: countItem(bot, i => /cooked_|bread|apple|carrot|potato|beetroot|melon|beef|porkchop|chicken|mutton|rabbit|cod|salmon|kelp|sweet_berries/.test(i.name)),
+    foodItems: countItem(bot, i => /cooked_|bread|apple|carrot|potato|beetroot|melon/.test(i.name)),
     hasPickaxe: countItem(bot, i => /_pickaxe$/.test(i.name)) > 0,
     hasWeapon: countItem(bot, i => /_(sword|axe)$/.test(i.name)) > 0
   };
@@ -41,16 +48,6 @@ function scoreGoals(bot, cfg, state) {
   const s = snapshot(bot);
   const scores = [];
   const add = (name, score, reason, action) => scores.push({ name, score, reason, action });
-  const logs = countItem(bot, i => /_log$|_stem$|_hyphae$/.test(i.name));
-  const planks = countItem(bot, i => /_planks$/.test(i.name));
-  const hasCraftingTable = countItem(bot, 'crafting_table') > 0;
-
-  // Early game is intentionally action-biased: obtain wood first, then tools.
-  // This prevents long base/research/explore goals from starving the basic loop.
-  if (logs < 8) add('wood-starter', 220, 'Starter wood is missing.', 'wood');
-  else if (!s.hasPickaxe) add('tools-starter', 210, 'A pickaxe is required for progression.', 'tools');
-  else if (s.foodItems < 4) add('food-starter', 180, 'A small food reserve is required.', 'food');
-
 
   if (s.health <= 8) add('survive', 100, 'Can is critical.', 'survive');
   if (s.food <= 6) add('food', 96, 'Hunger is critical.', 'food');
@@ -65,30 +62,11 @@ function scoreGoals(bot, cfg, state) {
   if (night && state.base) add('return-home', 70, 'Night is approaching/active.', 'home');
 
   if (!state.base && cfg.base && cfg.base.enabled !== false) {
-    add('find-home', s.hasPickaxe && logs >= 8 ? 36 : 10, 'No permanent home is known.', 'home');
-  }
-
-  if (state.base && Object.keys(state.baseRooms || {}).length < 4) {
-    add('base-development', 52, 'Base still has unfinished functional rooms.', 'base');
-  }
-
-  if (state.base && cfg.base?.autoExpand !== false) {
-    const overdue = !state.storage?.lastSortAt || Date.now() - state.storage.lastSortAt > ((cfg.storage?.autoSortMinutes || 20) * 60 * 1000);
-    if (overdue) add('base-maintenance', 33, 'Home/storage maintenance is due.', 'base-maintenance');
-  }
-
-  if (state.base && state.storage && Date.now() - (state.storage.lastSortAt || 0) > 20 * 60 * 1000) {
-    add('storage-sort', 34, 'Storage should be organized.', 'storage');
+    add('find-home', 68, 'No permanent home is known.', 'home');
   }
 
   if (state.base && !state.enchantRoomBuilt && s.xpLevel >= 5) {
     add('enchant-prep', 45, 'XP is available for progression.', 'enchant');
-  }
-
-  if (state.base && cfg.learningBuilds?.enabled !== false) {
-    const lb = state.learnedBuilds?.last;
-    const due = !lb || Date.now() - (lb.plannedAt || 0) > (cfg.learningBuilds?.cooldownMs || 35 * 60 * 1000);
-    if (due) add('learned-build', 28, 'A learned technique can be tested in the world.', 'learned-build');
   }
 
   // Long-term progression gets a moderate score, so urgent needs win.
@@ -101,12 +79,17 @@ function scoreGoals(bot, cfg, state) {
   if (countItem(bot, i => /_log$|_stem$|_hyphae$/.test(i.name)) < 8) {
     add('wood', 42, 'Wood reserve is low.', 'wood');
   }
-  if (!state.hasFarm || (state.farm && Date.now() - state.farm.lastRun > 15 * 60 * 1000)) {
-    add('farming', 44, 'Sustainable food production needs attention.', 'farming');
+
+  // Farming gives a sustainable food source instead of relying only on hunting.
+  // Kept below urgent hunger/tool needs so it never competes with survival.
+  if (cfg && cfg.farming && cfg.farming.enabled !== false && !night) {
+    const hasSeeds = countItem(bot, i => /seeds$|^carrot$|^potato$/.test(i.name)) > 0;
+    if (s.foodItems < 16 && (hasSeeds || state.hasFarm)) {
+      add('farm', 40, 'A self-sustaining crop farm keeps food reserves up.', 'farm');
+    }
   }
 
-  // Never inject background research or random wandering into the survival loop.
-  add('idle', 0, 'No urgent local survival task.', 'idle');
+  add('explore', night ? 12 : 25, 'No urgent survival task dominates.', 'explore');
   scores.sort((a, b) => b.score - a.score);
   return scores;
 }
@@ -118,33 +101,62 @@ function stateSnapshot(bot) {
 
 function chooseGoal(bot, cfg) {
   const state = loadState();
+  const snap = stateSnapshot(bot);
+  const context = experience.contextKey(snap);
+  const autonomy = (cfg && cfg.autonomy) || {};
+  const mistakeThreshold = autonomy.mistakeMemoryThreshold != null ? autonomy.mistakeMemoryThreshold : 3;
+  const imperfectionChance = autonomy.imperfectionChance != null ? autonomy.imperfectionChance : 0;
+
   const scores = scoreGoals(bot, cfg, state);
   // Learned experience adjusts the score without replacing the rule-based safety floor.
   for (const candidate of scores) {
     candidate.rawScore = candidate.score;
-    const ctx = stateSnapshot(bot);
-    candidate.learningBonus = experience.suggestAdjustment(candidate, ctx);
-    candidate.habitBonus = habits.adjustment(candidate.action, ctx);
-    candidate.score = candidate.score + candidate.learningBonus + candidate.habitBonus;
+    candidate.learningBonus = experience.suggestAdjustment(candidate, snap);
+    candidate.score = candidate.score + candidate.learningBonus;
+
+    // Explicit mistake avoidance: an action that has repeatedly gone badly in
+    // this same situation gets strongly deprioritized, not just nudged down.
+    // Never for critical survival goals — the bot is allowed to be forgetful
+    // about mining or wood, never about starving.
+    if (!CRITICAL_GOALS.has(candidate.name)) {
+      const habit = habits.getHabit(candidate.action || candidate.name, context);
+      if (habit && habit.uses >= mistakeThreshold && habit.value <= -4) {
+        candidate.score -= 45;
+        candidate.avoidedMistake = true;
+        candidate.reason = `${candidate.reason} (learned: this repeatedly failed in this situation, avoiding it.)`;
+      }
+    }
   }
-  scores.sort((a, b) => b.score - a.score);
-  let choice = scores[0];
-  const urgent = choice && (choice.name === 'survive' || choice.name === 'food');
-  if (!urgent && scores[1] && Math.abs(scores[0].score - scores[1].score) < 10 && Math.random() < ((cfg.decision || {}).imperfectionChance || 0.08)) {
-    choice = scores[1];
+  // Goal intent adds long-term direction; the adaptive planner then changes strategy
+  // according to danger, time pressure, inventory pressure and learned outcomes.
+  const withIntent = goalManager.selectIntent(snap, scores);
+  const adapted = planner.adaptCandidates(bot, snap, withIntent);
+  adapted.sort((a, b) => b.score - a.score);
+
+  let choice = adapted[0];
+
+  // Deliberate imperfection: a real player doesn't always take the objectively
+  // best action. When two options are close in score and neither is a safety
+  // emergency, occasionally go with the second-best on purpose. This never
+  // fires when the top choice is a clear, isolated best option.
+  if (
+    choice && adapted.length > 1 && !CRITICAL_GOALS.has(choice.name) &&
+    (choice.score - adapted[1].score) <= 15 &&
+    Math.random() < imperfectionChance
+  ) {
+    choice = adapted[1];
+    choice.imperfectPick = true;
   }
+
   state.lastDecision = {
     at: Date.now(),
     goal: choice ? choice.name : 'idle',
     reason: choice ? choice.reason : 'No candidate goal',
-    scores: scores.slice(0, 8)
+    imperfectPick: !!(choice && choice.imperfectPick),
+    scores: adapted.slice(0, 8)
   };
   saveState(state);
   return choice || { name: 'idle', action: 'idle', score: 0, reason: 'No candidate goal' };
-}
-
-function rememberHabit(action, before, result) {
-  habits.record(action, before, result);
 }
 
 function rememberEvent(type, data = {}) {
@@ -175,4 +187,4 @@ function rememberSuccess(key, data = {}) {
   saveState(state);
 }
 
-module.exports = { snapshot, scoreGoals, chooseGoal, rememberEvent, rememberFailure, rememberSuccess, rememberHabit, stateSnapshot, experience, habits };
+module.exports = { snapshot, scoreGoals, chooseGoal, rememberEvent, rememberFailure, rememberSuccess, stateSnapshot, experience };

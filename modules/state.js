@@ -5,14 +5,10 @@ const path = require('path');
 const FILE = path.join(__dirname, '..', 'survival_state.json');
 
 const DEFAULT = {
-  version: 2,
+  version: 5,
   base: null,
   home: null,
   enchantRoomBuilt: false,
-  hasFarm: false,
-  farm: null,
-  selfAwareness: null,
-  longTermGoals: {},
   lapisCollected: 0,
   lastDecision: null,
   memory: {
@@ -28,19 +24,10 @@ const DEFAULT = {
     episodes: [],
     principles: {}
   },
-  habits: { version: 1, actions: {}, recent: [] },
-  awareness: { version: 1, capabilities: {}, currentThought: null, reflections: [], lastResearchAt: 0 },
-  baseDesign: { palette: null, style: null, roomsPlanned: [], roomsBuilt: {} },
-  storage: { version: 1, categoryChests: {}, lastSortAt: 0 },
-  combat: { version: 1, kills: 0, retreats: 0, knockbackRecoveries: 0, lastThreatAt: 0 },
-  mining: { version: 1, sessions: 0, oresMined: 0, lastSessionAt: 0 },
-  knowledge: { version: 1, learnedTopics: {}, lastResearchAt: 0 },
-  itemKnowledge: { version: 1, itemCount: 0, generatedAt: 0 },
-  learnedBuilds: { last: null, history: [] },
-  learnedFarms: { last: null, history: [] },
-  acquisitionGraph: { version: 1, itemCount: 0, generatedAt: 0 },
-  acquisitionLearning: { methods: {}, recent: [] },
-  videoResearch: { last: null, history: [] }
+  goals: { active: {}, history: [], lastReview: 0 },
+  habits: { actions: {}, routines: {}, version: 1 },
+  planner: { strategy: 'balanced', strategies: {}, switches: [], lastSwitchAt: 0 },
+  knowledge: { version: 1, sources: {}, topics: {}, techniques: {}, claims: {}, experiments: [], queue: [], lastLearnAt: 0, lastSearchAt: 0 }
 };
 
 function mergeDefaults(value) {
@@ -49,19 +36,7 @@ function mergeDefaults(value) {
     ...DEFAULT, ...s,
     memory: { ...DEFAULT.memory, ...(s.memory || {}) },
     experience: { ...DEFAULT.experience, ...(s.experience || {}), actions: { ...(DEFAULT.experience.actions || {}), ...((s.experience || {}).actions || {}) }, episodes: ((s.experience || {}).episodes || []), principles: { ...((s.experience || {}).principles || {}) } },
-    habits: { ...DEFAULT.habits, ...(s.habits || {}), actions: { ...(DEFAULT.habits.actions || {}), ...((s.habits || {}).actions || {}) }, recent: ((s.habits || {}).recent || []) },
-    awareness: { ...DEFAULT.awareness, ...(s.awareness || {}), capabilities: { ...(s.awareness?.capabilities || {}) }, reflections: Array.isArray(s.awareness?.reflections) ? s.awareness.reflections.slice(-100) : [] },
-    baseDesign: { ...DEFAULT.baseDesign, ...(s.baseDesign || {}), roomsBuilt: { ...(s.baseDesign?.roomsBuilt || {}) } },
-    storage: { ...DEFAULT.storage, ...(s.storage || {}), categoryChests: { ...(s.storage?.categoryChests || {}) } },
-    combat: { ...DEFAULT.combat, ...(s.combat || {}) },
-    mining: { ...DEFAULT.mining, ...(s.mining || {}) },
-    knowledge: { ...DEFAULT.knowledge, ...(s.knowledge || {}), learnedTopics: { ...(s.knowledge?.learnedTopics || {}) } },
-    itemKnowledge: { ...DEFAULT.itemKnowledge, ...(s.itemKnowledge || {}) },
-    learnedBuilds: { ...DEFAULT.learnedBuilds, ...(s.learnedBuilds || {}), history: Array.isArray(s.learnedBuilds?.history) ? s.learnedBuilds.history.slice(-40) : [] },
-    learnedFarms: { ...DEFAULT.learnedFarms, ...(s.learnedFarms || {}), history: Array.isArray(s.learnedFarms?.history) ? s.learnedFarms.history.slice(-60) : [] },
-    acquisitionGraph: { ...DEFAULT.acquisitionGraph, ...(s.acquisitionGraph || {}) },
-    acquisitionLearning: { ...DEFAULT.acquisitionLearning, ...(s.acquisitionLearning || {}), methods: { ...(s.acquisitionLearning?.methods || {}) }, recent: Array.isArray(s.acquisitionLearning?.recent) ? s.acquisitionLearning.recent.slice(-100) : [] },
-    videoResearch: { ...DEFAULT.videoResearch, ...(s.videoResearch || {}), history: Array.isArray(s.videoResearch?.history) ? s.videoResearch.history.slice(-60) : [] }
+    knowledge: { ...DEFAULT.knowledge, ...(s.knowledge || {}), sources: { ...(DEFAULT.knowledge.sources || {}), ...((s.knowledge || {}).sources || {}) }, topics: { ...(DEFAULT.knowledge.topics || {}), ...((s.knowledge || {}).topics || {}) }, techniques: { ...(DEFAULT.knowledge.techniques || {}), ...((s.knowledge || {}).techniques || {}) }, claims: { ...(DEFAULT.knowledge.claims || {}), ...((s.knowledge || {}).claims || {}) }, experiments: ((s.knowledge || {}).experiments || []), queue: ((s.knowledge || {}).queue || []) }
   };
 }
 function loadState() {

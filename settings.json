@@ -8,23 +8,8 @@
   "server": {
     "ip": "31ibo311.aternos.me",
     "port": 31502,
-    "version": "1.21.11",
-    "try-creative": false,
-    "protocol-fallback": {
-      "enabled": true,
-      "versions": [
-        "1.21.11",
-        "1.21.4"
-      ],
-      "switch-on-errors": [
-        "serverbound/minecraft:hello",
-        "decoderexception",
-        "decod",
-        "protocol",
-        "bad packet"
-      ],
-      "cooldown-ms": 15000
-    }
+    "version": "",
+    "try-creative": false
   },
   "position": {
     "enabled": false,
@@ -42,8 +27,8 @@
       "sneak": false
     },
     "chat-messages": {
-      "enabled": false,
-      "repeat": false,
+      "enabled": true,
+      "repeat": true,
       "repeat-delay": 120,
       "messages": [
         "End'i yedim ya da öyle bir şey oldu, hatırlamıyorum",
@@ -82,22 +67,20 @@
     "max-reconnect-delay": 120000
   },
   "movement": {
-    "enabled": true,
-    "smart-jump": true,
-    "idleRadius": 12,
-    "idleGoalIntervalMs": 800,
-    "idleGoalTimeoutMs": 9000,
-    "stuckMs": 4500,
-    "random-jump": {
-      "enabled": false
-    },
+    "enabled": false,
     "circle-walk": {
-      "enabled": false
+      "enabled": false,
+      "radius": 4,
+      "speed": 3000
     },
     "look-around": {
-      "enabled": false
+      "enabled": false,
+      "interval": 5000
     },
-    "monitorIntervalMs": 350
+    "random-jump": {
+      "enabled": false,
+      "interval": 10000
+    }
   },
   "modules": {
     "avoidMobs": true,
@@ -109,23 +92,13 @@
   },
   "survivalAI": {
     "enabled": true,
-    "interval": 450,
+    "interval": 4000,
     "gather": {
       "woodTarget": 20,
       "cobbleTarget": 32
     },
     "mining": {
-      "shaftYLevel": -58,
-      "branchMining": true,
-      "maxSteps": 420,
-      "targetCount": 20,
-      "torchInterval": 6,
-      "includeIron": true,
-      "includeCoal": true,
-      "targetY": -58,
-      "scanRadius": 20,
-      "avoidLavaRadius": 3,
-      "preferHighValue": true
+      "shaftYLevel": -58
     },
     "base": {
       "enabled": true,
@@ -138,13 +111,10 @@
         25
       ],
       "roomSize": {
-        "w": 7,
-        "h": 5,
-        "l": 7
-      },
-      "buildRooms": true,
-      "decorate": true,
-      "autoExpand": true
+        "w": 5,
+        "h": 4,
+        "l": 5
+      }
     },
     "enchanting": {
       "enabled": true,
@@ -153,14 +123,7 @@
     },
     "decision": {
       "enabled": true,
-      "logScores": true,
-      "thinkDelay": false,
-      "thinkMinMs": 300,
-      "thinkMaxMs": 900,
-      "imperfectionChance": 0.08,
-      "moodMessages": false,
-      "moodCooldownMs": 120000,
-      "allowArtificialDelay": false
+      "logScores": true
     },
     "memory": {
       "enabled": true,
@@ -173,87 +136,37 @@
     "crafting": {
       "enabled": true,
       "repairBeforeReplace": true,
-      "keepBackupTools": true,
-      "generalRecipes": true,
-      "maxRecipeDepth": 5
+      "keepBackupTools": true
     },
     "storage": {
       "enabled": true,
-      "criticalEmptySlots": 2,
-      "organizeChests": true,
-      "radius": 12,
-      "categories": [
-        "food",
-        "ores",
-        "building",
-        "tools",
-        "farming",
-        "redstone",
-        "blocks",
-        "misc"
-      ],
-      "autoSortMinutes": 60
+      "criticalEmptySlots": 2
     },
     "safety": {
       "avoidRiskyExplorationAtNight": true
     },
     "farming": {
       "enabled": true,
-      "preferredCrop": "wheat",
-      "radius": 10
+      "plotSize": 5,
+      "crop": "wheat"
     },
-    "knowledge": {
-      "enabled": false,
-      "intervalMs": 2700000,
-      "maxResults": 10,
-      "maxVisionFrames": 8,
-      "storyboardFrames": 8,
-      "maxVideoBytes": 125829120,
-      "topics": [
-        "Minecraft survival base design rooms decoration",
-        "Minecraft iron farm tutorial survival",
-        "Minecraft automatic food farm tutorial",
-        "Minecraft mob XP farm tutorial",
-        "Minecraft item sorter storage room tutorial",
-        "Minecraft villager trading hall tutorial",
-        "Minecraft starter base build ideas survival"
-      ],
-      "youtubeEnabled": false,
-      "thumbnailQuality": "maxresdefault",
-      "maxAnalysisChars": 50000
+    "chestSystem": {
+      "enabled": true
     },
-    "learningBuilds": {
-      "enabled": false,
-      "cooldownMs": 2100000,
-      "maxMaterials": 12,
-      "topics": [
-        "Minecraft automatic food farm tutorial",
-        "Minecraft item sorter storage room tutorial",
-        "Minecraft survival base design rooms decoration",
-        "Minecraft starter base build ideas survival"
-      ],
-      "executeLearnedBlueprint": true,
-      "researchBeforeBuild": false,
-      "maxPlacements": 10000,
-      "materialMultiplier": 1,
-      "maxRecipeDepth": 8
+    "craftKnowledge": {
+      "enabled": true
     },
-    "acquisition": {
-      "enabled": true,
-      "refreshHours": 24,
-      "maxDepth": 8,
-      "defaultCount": 1,
-      "fullGraph": true,
-      "recordOutcomes": true
+    "autonomy": {
+      "thinkDelayMs": [300, 900],
+      "imperfectionChance": 0.08,
+      "mistakeMemoryThreshold": 3,
+      "moodChat": false,
+      "moodChatChance": 0.05
     }
   },
   "combat": {
     "attack-mobs": true,
-    "auto-eat": true,
-    "advanced": true,
-    "targetRange": 10,
-    "attackCooldownMs": 500,
-    "retreatHealth": 8
+    "auto-eat": true
   },
   "beds": {
     "pick-up-day": false,
@@ -273,5 +186,14 @@
     "tpWhitelist": [
       "KagiMBot"
     ]
+  },
+  "knowledge": {
+    "enabled": true,
+    "interval": 1800000,
+    "topicsPerCycle": 1,
+    "sourcesPerTopic": 2,
+    "youtube": { "enabled": true, "preferTranscript": true },
+    "web": { "enabled": true },
+    "autoExperimentLogging": true
   }
 }
