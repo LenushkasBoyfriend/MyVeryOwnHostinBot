@@ -5,19 +5,24 @@ const experience = require('./experienceEngine');
 const habits = require('./habitEngine');
 const goals = require('./goalManager');
 
+const DEFAULT_STRATEGIES = {
+  balanced: { rewardScale: 1, riskPenalty: 1, timePenalty: 1 },
+  cautious: { rewardScale: 0.9, riskPenalty: 1.5, timePenalty: 1.1 },
+  efficient: { rewardScale: 1.2, riskPenalty: 0.9, timePenalty: 0.8 },
+  exploratory: { rewardScale: 1.15, riskPenalty: 0.7, timePenalty: 0.9 }
+};
+
 function ensure(state) {
-  state.planner = state.planner || {
-    strategy: 'balanced',
-    strategies: {
-      balanced: { rewardScale: 1, riskPenalty: 1, timePenalty: 1 },
-      cautious: { rewardScale: 0.9, riskPenalty: 1.5, timePenalty: 1.1 },
-      efficient: { rewardScale: 1.2, riskPenalty: 0.9, timePenalty: 0.8 },
-      exploratory: { rewardScale: 1.15, riskPenalty: 0.7, timePenalty: 0.9 }
-    },
-    switches: [],
-    lastSwitchAt: 0
-  };
+  state.planner = state.planner || { strategy: 'balanced', strategies: {}, switches: [], lastSwitchAt: 0 };
   state.planner.strategies = state.planner.strategies || {};
+  // state.js'in DEFAULT'u zaten boş bir `strategies: {}` ile geliyor, yani
+  // yukarıdaki `state.planner || {...}` hiçbir zaman devreye girmeyebilir.
+  // Eksik olan profilleri burada tek tek tamamla ki adaptCandidates'taki
+  // `planner.strategies[strategy]` her zaman gerçek bir profil bulsun.
+  for (const [name, defaults] of Object.entries(DEFAULT_STRATEGIES)) {
+    state.planner.strategies[name] = { ...defaults, ...(state.planner.strategies[name] || {}) };
+  }
+  if (!state.planner.strategy) state.planner.strategy = 'balanced';
   return state.planner;
 }
 
